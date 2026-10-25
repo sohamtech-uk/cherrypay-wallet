@@ -1,3 +1,7 @@
+import { buildApp } from './app.js';
+import { getConfig } from './config.js';
+import { PaymentService } from './payments/service.js';
+import { mockChain, mockPolicy } from './payments/test-fixtures.js';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { db, initializeStore, createAccount, createSession, sessionAccount, revokeSession, newChallenge, withLockedAccount, consumeLockedChallenge, credentialsLocked, addCredentialLocked } from './store.js';
@@ -48,6 +52,26 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(await repository.wallet(wallet.id,account.id)).toMatchObject(wallet);
     await expect(repository.wallet(wallet.id,randomUUID())).rejects.toMatchObject({code:'WALLET_NOT_FOUND'});
   });
+  it('authenticates payment routes with persisted sessions and immediately observes revocation', async () => {
+    const service = new PaymentService(repository, mockChain(), mockPolicy(), 1);
+    // This test exercises HTTP + real persistence, without running the RPC monitor.
+    service.tick = async () => {};
+    const config = getConfig({ WALLET_ORIGIN: 'https://wallet.example' });
+    const app = await buildApp({ config, payments: service, logger: false });
+    const session = await createSession(account.id);
+    const other = await createAccount();
+    const outsider = await createSession(other.id);
+    const url = `/api/v1/wallets/${wallet.id}`;
+    try {
+      expect((await app.inject({ url })).statusCode).toBe(401);
+      expect((await app.inject({ url, headers: { authorization: `Bearer ${outsider.token}` } })).statusCode).toBe(404);
+      const response = await app.inject({ url, headers: { authorization: `Bearer ${session.token}` } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().address).toBe(wallet.address);
+      await revokeSession(session.token);
+      expect((await app.inject({ url, headers: { authorization: `Bearer ${session.token}` } })).statusCode).toBe(401);
+    } finally { await app.close(); await revokeSession(outsider.token); }
+  });
   it('serializes idempotent creates and fences one unresolved relayer payment',async () => {
     const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'10000000',maxFeeStroops:'1000'};
     const key='payment_'+randomUUID().replaceAll('-','');
@@ -85,3 +109,4 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(await repository.balance(wallet.address)).toMatchObject({amountStroops:'3000',ledger:300});
   });
 });
+
