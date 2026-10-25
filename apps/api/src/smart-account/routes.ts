@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { sessionAccount } from '../store.js';
 import { createTestnetRpc } from './deployment-evidence.js';
@@ -14,11 +15,17 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     reply.header('Cache-Control', 'no-store');
     return {
       network: 'TESTNET',
-      contractSelected: false,
+      contractSelected: true,
+      candidate: SMART_ACCOUNT_KIT.name,
+      candidateVersion: SMART_ACCOUNT_KIT.version,
+      requiredStellarSdk: SMART_ACCOUNT_KIT.requiredStellarSdk,
+      accountWasmHash: SMART_ACCOUNT_KIT.accountWasmHash,
+      webauthnVerifierAddress: SMART_ACCOUNT_KIT.webauthnVerifierAddress,
+      securityStatus: SMART_ACCOUNT_KIT.securityStatus,
       deploymentEnabled: false,
       spendingEnabled: false,
       recoveryEnabled: false,
-      reason: 'SMART_ACCOUNT_CONTRACT_NOT_VERIFIED',
+      reason: 'SDK_VERSION_MIGRATION_AND_ONCHAIN_ATTESTATION_REQUIRED',
     };
   });
 
