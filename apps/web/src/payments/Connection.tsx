@@ -4,6 +4,7 @@ import { apiClient, connectPaymentAdapter, discoverWallets, object, text, type O
 import type { PaymentAdapter } from './model';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
+const deploymentStatuses = ['NOT_STARTED', 'PENDING', 'AWAITING_PASSKEY', 'SUBMITTED', 'CONFIRMED', 'ACTIVE', 'FAILED'];
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
@@ -33,7 +34,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const active = (id: number) => generation.current === id && !!token.current && Date.now() < deadline.current;
   function clearSession(message = '') {
     generation.current++; token.current = undefined; clearTimeout(expiry.current);
-    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId('');
+    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus('');
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
   async function openWallet(selected: OwnedWallet, id: number) {
@@ -45,10 +46,21 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function loadWallets(id: number) {
     const owned = await discoverWallets(apiClient(() => token.current));
     if (!active(id)) return;
-    setWallets(owned); setWalletId(owned[0]?.id ?? '');
+    setWallets(owned); setWalletId(owned[0]?.id ?? ''); setDeploymentStatus('');
     if (owned.length === 0) {
-      const job = object(await apiClient(() => token.current)('smart-account/deployment', {}));
-      if (active(id)) setDeploymentStatus(text(job.status));
+      // Reservation status is not authentication or on-chain authority. An outage here
+      // must not invalidate a successful passkey enrollment/login or claim a deployment.
+      try {
+        const job = object(await apiClient(() => token.current)('smart-account/deployment', {}));
+        if (!active(id)) return;
+        const status = text(job.status);
+        if (!deploymentStatuses.includes(status) || job.deploymentEnabled !== false) throw Error('Invalid deployment status.');
+        setDeploymentStatus(status);
+      } catch {
+        if (!active(id)) return;
+        setDeploymentStatus('UNAVAILABLE');
+        setError('Provisioning status is unavailable. Your passkey profile remains connected. Disconnect and reconnect to retry.');
+      }
     } else setDeploymentStatus('ACTIVE');
     if (owned.length === 1) await openWallet(owned[0], id);
   }
@@ -62,7 +74,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     const previous = token.current;
     // Invalidate any open review when a newly verified session replaces the old one.
     if (previous) { onConnect(null); setConnected(false); }
-    clearTimeout(expiry.current);
+    clearTimeout(expiry.current); setDeploymentStatus('');
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
     setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
