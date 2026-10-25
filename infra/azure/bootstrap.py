@@ -105,14 +105,19 @@ def main():
         if nsg["name"] == "nsg-cherrypay-wallet-postgres" and not owned(nsg): raise ValueError("Existing network security group is not wallet-owned")
     existing_group=next((g for g in az("group", "list") if g["name"].lower()==c["resourceGroup"].lower()),None)
     if existing_group and not owned(existing_group): raise ValueError("Refusing to modify an unrelated resource group")
+    existing_resources=az("resource","list","-g",c["resourceGroup"]) if existing_group else []
+    if any(not owned(r) for r in existing_resources if r["type"] in ["Microsoft.KeyVault/vaults","Microsoft.DBforPostgreSQL/flexibleServers","Microsoft.App/containerApps"]):
+        raise ValueError("An existing resource is not wallet-owned")
+    if existing_group:
+        for app in az("containerapp","list","-g",c["resourceGroup"]):
+            if any(v.get("name")=="WALLET_PAYMENTS_ENABLED" and v.get("value")=="true" for container in app["properties"]["template"]["containers"] for v in container.get("env",[])):
+                raise ValueError("Bootstrap cannot modify an activated payment environment")
     sha=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
     if subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip(): raise ValueError("A clean checkout is required")
     print(json.dumps({"mode":"apply" if args.apply else "plan","commit":sha,"resourceGroup":c["resourceGroup"],"server":c["serverName"],"databaseSku":"Standard_B1ms / 32 GiB / private access / 7-day backup","app":c["appName"],"subnet":c["postgresSubnetPrefix"],"paymentsEnabled":False}),flush=True)
     if not args.apply: return
     if not existing_group:
         az("group","create","-n",c["resourceGroup"],"-l",c["location"],"--tags",*[k+"="+v for k,v in TAGS.items()])
-    if any(not owned(r) for r in az("resource","list","-g",c["resourceGroup"]) if r["type"] in ["Microsoft.KeyVault/vaults","Microsoft.DBforPostgreSQL/flexibleServers","Microsoft.App/containerApps"]):
-        raise ValueError("An existing resource is not wallet-owned")
     with tempfile.TemporaryDirectory(prefix="wallet-azure-") as scratch:
         operator=az("ad","signed-in-user","show","--query","id")
         print("Creating wallet vault and operator-scoped secret access",flush=True)
@@ -126,6 +131,8 @@ def main():
                 time.sleep(5)
         def password(name):
             return az("keyvault","secret","show","--vault-name",c["vaultName"],"--name",name,"--query","value") if name in names else secrets.token_hex(32)
+        if any(r["name"]==c["serverName"] and r["type"]=="Microsoft.DBforPostgreSQL/flexibleServers" for r in existing_resources) and not {"postgres-administrator-password","postgres-runtime-password"}.issubset(names):
+            raise ValueError("Existing database credentials are missing; restore the wallet secrets before retrying")
         admin_password=password("postgres-administrator-password")
         runtime_password=password("postgres-runtime-password")
         if not all(re.fullmatch(r"[a-zA-Z0-9_-]{32,128}",v) for v in [admin_password,runtime_password]): raise ValueError("Stored wallet credential format is invalid")
