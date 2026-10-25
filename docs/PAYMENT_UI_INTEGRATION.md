@@ -1,6 +1,6 @@
 # A4–A7 payment UI handoff
 
-This branch builds on Sunil's `feat/wallet-ui` scaffold (c55d0ca). It does not implement A1–A3 onboarding, authentication, balances or recovery credentials. App.tsx changes are route/navigation registration and an optional provider prop. No backend endpoint is assumed or invented.
+Sunil is working on B1–B2 (smart-account/SDK feasibility, passkey authorization, wallet discovery and independent recovery). This branch implements the A4–A7 frontend screens on the existing `feat/wallet-ui` scaffold (c55d0ca). It does not implement B1–B2 or extend A1–A3 onboarding and balance features. App.tsx changes are route/navigation registration and an optional provider prop. No backend endpoint is assumed or invented.
 
 ## Connecting the screens
 
