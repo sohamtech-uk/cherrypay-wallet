@@ -19,6 +19,10 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
         properties: { priority: 110, direction: 'Inbound', access: 'Allow', protocol: 'Tcp', sourceAddressPrefix: subnetPrefix, sourcePortRange: '*', destinationAddressPrefix: subnetPrefix, destinationPortRange: '5432' }
       }
       {
+        name: 'AllowAzureHealthProbes'
+        properties: { priority: 115, direction: 'Inbound', access: 'Allow', protocol: 'Tcp', sourceAddressPrefix: 'AzureLoadBalancer', sourcePortRange: '*', destinationAddressPrefix: subnetPrefix, destinationPortRange: '5432' }
+      }
+      {
         name: 'DenyOtherDatabaseClients'
         properties: { priority: 120, direction: 'Inbound', access: 'Deny', protocol: 'Tcp', sourceAddressPrefix: '*', sourcePortRange: '*', destinationAddressPrefix: subnetPrefix, destinationPortRange: '5432' }
       }

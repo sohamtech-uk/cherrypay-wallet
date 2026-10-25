@@ -8,7 +8,7 @@ param administratorUrl string
 @secure()
 param runtimePassword string
 resource job 'Microsoft.App/jobs@2025-01-01' = {
-  name: 'caj-cherrypay-wallet-database-init'
+  name: 'caj-cpw-wallet-db-init'
   location: location
   tags: { application: 'cherrypay-wallet', network: 'stellar-testnet' }
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${identityId}': {} } }

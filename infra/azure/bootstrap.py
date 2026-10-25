@@ -142,7 +142,7 @@ def main():
         admin_url="postgresql://walletadmin:"+quote(admin_password,safe="")+"@"+host+":5432/cherrypay_wallet"
         print("Initializing restricted database role through a private-network job",flush=True)
         deploy(c,"database-job",dict(location=c["location"],environmentId=c["environmentId"],registryServer=registry["loginServer"],identityId=identity_base+"id-cherrypay-wallet-bootstrap",apiImage=images["api"],administratorUrl=admin_url,runtimePassword=runtime_password),scratch)
-        job="caj-cherrypay-wallet-database-init"
+        job="caj-cpw-wallet-db-init"
         execution=az("containerapp","job","start","-g",c["resourceGroup"],"-n",job)["name"]
         for attempt in range(90):
             result=az("containerapp","job","execution","show","-g",c["resourceGroup"],"-n",job,"--job-execution-name",execution)
