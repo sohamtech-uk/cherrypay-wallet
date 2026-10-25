@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Account, Address, Contract, StrKey, TransactionBuilder, buildAuthorizationEntryPreimage, hash, rpc, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { Client, type ContextRule, type Signer } from 'smart-account-kit-bindings';
+import { Client, type Signer } from 'smart-account-kit-bindings';
 import { decodeCredentialPublicKey } from '@simplewebauthn/server/helpers';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import { getCredentials } from '../store.js';
@@ -8,6 +8,7 @@ import { PASSPHRASE, requireThat, type Attempt, type PolicyReader, type Wallet }
 import { addressCredentials, assertTransferAuthorization } from '../payments/stellar.js';
 import type { ContractPasskeyCodec } from '../payments/passkey-approval.js';
 import { verifyCurrentContractCode } from './receive-route.js';
+import { readHydratedContextRule, simulationReader, type HydratedContextRule, type RawContractRead, type RuleSpec } from './context-rules.js';
 
 // Source-reviewed ABI: OpenZeppelin/stellar-contracts v0.8.0 at ddc327eb92d63709436da3a8455f641c2d5476c5.
 // Hash identified by upstream Smart Account Kit's auth-digest-scheme.ts.
@@ -86,20 +87,18 @@ export class PinnedAccountAdapter implements PolicyReader, ContractPasskeyCodec 
   private async read(address:string) {
     const a=this.approved.get(address);requireThat(a,'UNAPPROVED_ACCOUNT');
     const [accountCode,verifierCode]=await Promise.all([verifyCurrentContractCode(this.server,address,a.accountWasmHash),verifyCurrentContractCode(this.server,a.verifierAddress,a.verifierWasmHash)]);
-    const spec=new Client({contractId:address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec;
-    const query=async(name:'get_context_rule'|'get_context_rules_count',args:xdr.ScVal[])=>{
-      const tx=readTransaction(address,name,args);
-      const result=await this.server.simulateTransaction(tx,undefined,'enforce');
-      requireThat(rpc.Api.isSimulationSuccess(result) && !rpc.Api.isSimulationRestore(result) && result.result && result.result.auth.length===0,'POLICY_READ_UNAVAILABLE');
-      requireThat(result.latestLedger>=Math.max(accountCode.ledger,verifierCode.ledger),'STALE_POLICY_READ');
-      return {value:spec.funcResToNative(name,result.result.retval.toXDR('base64')),ledger:result.latestLedger,raw:result.result.retval.toXDR('base64')};
-    };
-    const [count,primary,backup,owned]=await Promise.all([query('get_context_rules_count',[]),query('get_context_rule',[xdr.ScVal.scvU32(a.primaryRuleId)]),query('get_context_rule',[xdr.ScVal.scvU32(a.backupRuleId)]),this.credentials(a.owner)]);
-    // Never combine code and rules observed at different ledger snapshots.
-    requireThat([accountCode.ledger,verifierCode.ledger,count.ledger,backup.ledger].every(ledger=>ledger===primary.ledger),'INCONSISTENT_POLICY_SNAPSHOT');
-    requireThat(count.value===2,'UNEXPECTED_ACCOUNT_RULES');
-    const check=(response:typeof primary,id:number,credentialId:string)=>{
-      const rule=response.value as ContextRule;
+    const spec=new Client({contractId:address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec as unknown as RuleSpec;
+    const read=simulationReader(this.server,address);
+    const minLedger=Math.max(accountCode.ledger,verifierCode.ledger);
+    const fresh:RawContractRead=async(fn,args)=>{const r=await read(fn,args);requireThat(r.ledger>=minLedger,'STALE_POLICY_READ');return r;};
+    const [countRead,primary,backup,owned]=await Promise.all([fresh('get_context_rules_count',[]),readHydratedContextRule(fresh,spec,a.primaryRuleId),readHydratedContextRule(fresh,spec,a.backupRuleId),this.credentials(a.owner)]);
+    const count=spec.funcResToNative('get_context_rules_count',countRead.retval.toXDR('base64'));
+    // Never combine code, rules and hydrated IDs observed at different ledger snapshots.
+    const snapshot=primary.ledgers[0];
+    requireThat([accountCode.ledger,verifierCode.ledger,countRead.ledger,...primary.ledgers,...backup.ledgers].every(ledger=>ledger===snapshot),'INCONSISTENT_POLICY_SNAPSHOT');
+    requireThat(count===2,'UNEXPECTED_ACCOUNT_RULES');
+    const check=(response:HydratedContextRule,id:number,credentialId:string)=>{
+      const rule=response.rule;
       requireThat(rule.id===id && rule.context_type.tag==='Default' && rule.valid_until==null && rule.policies.length===0 && rule.policy_ids.length===0 && rule.signers.length===1 && rule.signer_ids.length===1,'UNSUPPORTED_ACCOUNT_POLICY');
       const credential=owned.find(c=>c.id===credentialId);requireThat(credential,'ONCHAIN_CREDENTIAL_NOT_OWNED');
       const expected=credentialKeyData(credential),signer=rule.signers[0];
@@ -108,8 +107,12 @@ export class PinnedAccountAdapter implements PolicyReader, ContractPasskeyCodec 
     };
     const p=check(primary,a.primaryRuleId,a.primaryCredentialId),b=check(backup,a.backupRuleId,a.backupCredentialId);
     requireThat(!p.key.equals(b.key),'BACKUP_KEY_MUST_BE_INDEPENDENT');
-    const fingerprint=sha(JSON.stringify([PASSPHRASE,address,a.accountWasmHash,a.verifierAddress,a.verifierWasmHash,primary.raw,backup.raw]));
-    return {approved:a,primary:p,backup:b,fingerprint,ledger:Math.max(primary.ledger,backup.ledger)};
+    // Raw getter output is fingerprinted as returned. IDs resolved separately (older account
+    // builds omit them from get_context_rule) are appended so signer re-registration is detected.
+    const ids=(h:HydratedContextRule)=>h.hydrated.signerIds||h.hydrated.policyIds?[h.rule.signer_ids,h.rule.policy_ids]:[];
+    const hydratedIds=[...ids(primary),...ids(backup)];
+    const fingerprint=sha(JSON.stringify([PASSPHRASE,address,a.accountWasmHash,a.verifierAddress,a.verifierWasmHash,primary.raw,backup.raw,...(hydratedIds.length?[hydratedIds]:[])]));
+    return {approved:a,primary:p,backup:b,fingerprint,ledger:snapshot};
   }
   async current(address:string) {const state=await this.read(address);return {fingerprint:state.fingerprint,recoveryReady:true};}
   private async context(wallet:Wallet,attempt:Attempt) {

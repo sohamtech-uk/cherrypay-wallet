@@ -39,6 +39,12 @@ the Rust struct layout and actual P-256 signature encoding; they do not execute 
 deployed WASM or establish artifact provenance.
 
 Current code bytes, TTL and both signer rules must be read at the same ledger.
+When a rule getter omits signer/policy ID vectors, the pinned adapter resolves them
+through the contract registry getters. Every lookup must match that same ledger.
+Hydrated IDs participate in the policy fingerprint, so removing/re-registering a
+signer invalidates outstanding approvals. Already complete rule records retain
+their existing fingerprint. Hydration does not select another account artifact,
+change the structured digest scheme, or bypass reviewed startup configuration.
 Exactly two permanent Default rules are accepted, each with one separately owned
 P-256 key and no policies. A two-signer rule requiring both signatures is rejected
 as a backup arrangement. Normal sends select the primary rule explicitly. This
