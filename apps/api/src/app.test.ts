@@ -17,6 +17,16 @@ function payments() {
   return service;
 }
 describe('application payment composition', () => {
+  it('keeps external integrations gated and enforces origin on quote creation', async () => {
+    const app = await buildApp({ config, logger: false });
+    try {
+      expect((await app.inject('/api/v1/aurora/capabilities')).json().enabled).toBe(false);
+      const result = await app.inject({ method: 'POST', url: '/api/v1/aurora/quotes', headers: { origin: 'https://evil.example' }, payload: { recipient: 'x', refundTo: 'x', amount: '1' } });
+      expect(result.statusCode).toBe(403);
+      expect(result.headers['cache-control']).toBe('no-store');
+      expect(identity.sessionAccount).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
   it('separates database readiness from process liveness and redacts failures', async () => {
     const checkDatabase=vi.fn().mockResolvedValue(undefined);
     const app=await buildApp({config,logger:false,checkDatabase});

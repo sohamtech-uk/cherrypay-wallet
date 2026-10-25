@@ -1,4 +1,5 @@
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
+import { registerIntegrationRoutes } from './integrations/routes.js';
 import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
 import type { PaymentDependencies } from './payments/routes.js';
 import type { PaymentService } from './payments/service.js';
@@ -25,6 +26,7 @@ app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {
 app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:false};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 await registerSmartAccountRoutes(app);
+await registerIntegrationRoutes(app, config.integrations);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 await registerPaymentRoutes(app, options.payments ? {
   service: options.payments,
