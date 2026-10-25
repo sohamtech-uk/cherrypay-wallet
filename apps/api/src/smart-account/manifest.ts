@@ -4,6 +4,7 @@ import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { requireThat } from '../payments/model.js';
 import { ACCOUNT_V080_HASH, type ApprovedAccount } from './pinned-adapter.js';
 import { createPinnedPaymentRuntime } from './runtime.js';
+import { validateKitV080DeploymentConfig, TESTNET_V080 } from './kit-v080-preflight.js';
 
 export type PaymentManifest = Readonly<{
   version: 1; network: 'TESTNET'; startLedger: number;
@@ -36,6 +37,7 @@ export function parsePaymentManifest(value: unknown): PaymentManifest {
     requireThat(string(a.walletId, /^[A-Za-z0-9_-]{1,128}$/) && string(a.owner, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/), 'INVALID_MANIFEST_OWNER');
     requireThat(typeof a.address === 'string' && StrKey.isValidContract(a.address) && typeof a.verifierAddress === 'string' && StrKey.isValidContract(a.verifierAddress), 'INVALID_MANIFEST_ADDRESS');
     requireThat(a.accountWasmHash === ACCOUNT_V080_HASH && string(a.verifierWasmHash, hash), 'UNAPPROVED_MANIFEST_CODE');
+    validateKitV080DeploymentConfig({networkPassphrase: TESTNET_V080.networkPassphrase, accountWasmHash: a.accountWasmHash as string, verifierAddress: a.verifierAddress as string, verifierWasmHash: a.verifierWasmHash as string});
     requireThat(uint(a.primaryRuleId) && uint(a.backupRuleId) && a.primaryRuleId !== a.backupRuleId, 'INVALID_MANIFEST_RULES');
     requireThat(credential(a.primaryCredentialId) && credential(a.backupCredentialId) && a.primaryCredentialId !== a.backupCredentialId, 'INVALID_MANIFEST_CREDENTIALS');
     requireThat(string(a.deploymentTransactionHash, hash) && string(a.recoveryTransactionHash, hash) && a.deploymentTransactionHash !== a.recoveryTransactionHash, 'MANIFEST_EVIDENCE_REQUIRED');
