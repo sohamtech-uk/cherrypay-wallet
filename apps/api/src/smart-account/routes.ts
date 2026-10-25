@@ -15,7 +15,7 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     reply.header('Cache-Control', 'no-store');
     return {
       network: 'TESTNET',
-      contractSelected: true,
+      contractSelected: false,
       candidate: SMART_ACCOUNT_KIT.name,
       candidateVersion: SMART_ACCOUNT_KIT.version,
       requiredStellarSdk: SMART_ACCOUNT_KIT.requiredStellarSdk,
@@ -25,7 +25,7 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
       deploymentEnabled: false,
       spendingEnabled: false,
       recoveryEnabled: false,
-      reason: 'SDK_VERSION_MIGRATION_AND_ONCHAIN_ATTESTATION_REQUIRED',
+      reason: 'NO_APPROVED_ACCOUNT_WASM_OR_VERIFIED_CONTRACT_ADAPTER',
     };
   });
 
