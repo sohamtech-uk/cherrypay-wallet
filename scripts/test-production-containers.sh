@@ -27,10 +27,10 @@ assert.equal(page.status,200); assert.match(await page.text(),/<div id="root">/)
 assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
 const closed=await fetch(root+'/api/v1/wallets/unknown/attempts');
 assert.equal(closed.status,503);
-const wrong=await fetch(root+'/api/v1/passkeys/registration/options',{method:'POST',headers:{origin:'https://evil.example','content-type':'application/json'},body:'{}'});
+const wrong=await fetch(root+'/api/v1/passkeys/registration/options',{method:'POST',headers:{origin:'https://evil.example','content-type':'application/json'},body:JSON.stringify({email:'smoke-'+crypto.randomUUID()+'@example.com'})});
 assert.equal(wrong.status,403);
 // Azure appends the real address after any client-supplied spoofed prefix.
-const enroll=async ip=>fetch(root+'/api/v1/passkeys/registration/options',{method:'POST',headers:{origin:root,'content-type':'application/json','x-forwarded-for':`192.0.2.99, ${ip}`},body:'{}'});
+const enroll=async ip=>fetch(root+'/api/v1/passkeys/registration/options',{method:'POST',headers:{origin:root,'content-type':'application/json','x-forwarded-for':`192.0.2.99, ${ip}`},body:JSON.stringify({email:'smoke-'+crypto.randomUUID()+'@example.com'})});
 for(let i=0;i<10;i++) assert.equal((await enroll('192.0.2.1')).status,200);
 assert.equal((await enroll('192.0.2.1')).status,429);
 assert.equal((await enroll('192.0.2.2')).status,200);

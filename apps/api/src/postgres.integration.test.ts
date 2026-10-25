@@ -25,7 +25,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     await initializeStore();
     // Re-running checksum-validated migrations must be a no-op.
     await initializeStore();
-    account=await createAccount();
+    account=await createAccount(`${randomUUID()}@example.com`);
     wallet={id:randomUUID(),owner:account.id,address:'C'+'B'.repeat(55),policy:'testnet-policy',routes:['classic'],createdAt:Date.now()};
     await db.query("INSERT INTO wallet_onchain_accounts(id,owner,network,address,policy,routes,created_at) VALUES ($1,$2,'TESTNET',$3,$4,$5::jsonb,$6)",[wallet.id,wallet.owner,wallet.address,wallet.policy,JSON.stringify(wallet.routes),wallet.createdAt]);
   },30_000);
@@ -61,7 +61,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     const post=(path:string,payload:Record<string,unknown>,token?:string)=>app.inject({method:'POST',url:`/api/v1/${path}`,headers:{origin:'https://wallet.example',...(token?{authorization:`Bearer ${token}`}:{})},payload});
     try {
       const primary=testPasskey(),backup=testPasskey();
-      const initial=(await post('passkeys/registration/options',{})).json();
+      const initial=(await post('passkeys/registration/options',{email:`${randomUUID()}@example.com`})).json();
       expect(initial.options.pubKeyCredParams).toEqual([{alg:-7,type:'public-key'}]);
       const enrolled=await post('passkeys/registration/verify',{accountID:initial.accountID,requestID:initial.requestID,response:primary.registration(initial.options.challenge)});
       expect(enrolled.statusCode).toBe(200);const first=enrolled.json();
@@ -72,7 +72,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const payload={accountID:first.accountID,requestID:second.requestID,response:backup.registration(second.options.challenge)};
       const otherSession=await createSession(first.accountID);
       expect((await post('passkeys/registration/verify',payload,otherSession.token)).statusCode).toBe(400);
-      const foreign=await createAccount(),foreignSession=await createSession(foreign.id);
+      const foreign=await createAccount(`${randomUUID()}@example.com`),foreignSession=await createSession(foreign.id);
       expect((await post('passkeys/registration/verify',payload,foreignSession.token)).statusCode).toBe(403);
       const added=await post('passkeys/registration/verify',payload,first.token);
       expect(added.statusCode).toBe(200);const next=added.json();
@@ -95,7 +95,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     try {
       for(const failure of ['algorithm','origin','verification']) {
         const key=testPasskey(failure==='algorithm'?'EdDSA':'ES256');
-        const initial=(await post('options',{})).json();
+        const initial=(await post('options',{email:`${randomUUID()}@example.com`})).json();
         const response=key.registration(initial.options.challenge,failure==='origin'?'https://evil.example':'https://wallet.example',failure!=='verification');
         expect((await post('verify',{accountID:initial.accountID,requestID:initial.requestID,response})).statusCode).toBe(400);
         const result=await db.query('SELECT id FROM wallet_credentials WHERE account_id=$1',[initial.accountID]);
@@ -117,7 +117,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     const config = getConfig({ WALLET_ORIGIN: 'https://wallet.example' });
     const app = await buildApp({ config, payments: service, logger: false });
     const session = await createSession(account.id);
-    const other = await createAccount();
+    const other = await createAccount(`${randomUUID()}@example.com`);
     const outsider = await createSession(other.id);
     const url = `/api/v1/wallets/${wallet.id}`;
     try {
@@ -135,7 +135,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   });
 
   it('provisions reviewed accounts atomically and idempotently without silently replacing saved authority',async()=>{
-    const owner=await createAccount(), fixture=manifestFixture();
+    const owner=await createAccount(`${randomUUID()}@example.com`), fixture=manifestFixture();
     const approved={...fixture.accounts[0],owner:owner.id,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.from(randomUUID().replaceAll('-','').repeat(2),'hex'))};
     const manifest={...fixture,accounts:[approved]};
     // Chain policy is injected; this test proves SQL boundaries, not live deployment.
@@ -147,12 +147,12 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(results.flatMap(r=>r.wallets.map(w=>w.action)).sort()).toEqual(['create','unchanged']);
     expect(await repository.wallet(approved.walletId,owner.id)).toMatchObject({address:approved.address,policy:'d'.repeat(64),routes:['classic','contract']});
     await expect(provisionAccounts(manifest,true,{pool:db,policies:{current:async()=>({fingerprint:'e'.repeat(64),recoveryReady:true})}})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
-    const outsider=await createAccount();
+    const outsider=await createAccount(`${randomUUID()}@example.com`);
     await expect(provisionAccounts({...manifest,accounts:[{...approved,owner:outsider.id}]},true,{pool:db,policies})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
     expect((await repository.wallet(approved.walletId,owner.id)).policy).toBe('d'.repeat(64));
   });
   it('rolls back every new wallet if a later provisioning entry fails chain verification',async()=>{
-    const owner=await createAccount(), fixture=manifestFixture();
+    const owner=await createAccount(`${randomUUID()}@example.com`), fixture=manifestFixture();
     const a={...fixture.accounts[0],owner:owner.id,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.alloc(32,31))};
     const b={...a,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.alloc(32,32))};
     const policies={current:async(address:string)=>{if(address===b.address)throw Error('RPC failure');return {fingerprint:'d'.repeat(64),recoveryReady:true};}};
@@ -252,7 +252,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     const lease=await repository.claim(a.id,['preparing']);lease.attempt.status='rejected';await repository.finish(lease.attempt,lease.token);
   });
   it('verifies real P-256 transfer assertions, origin, challenge and counter under a database lock',async()=>{
-    const owner=await createAccount(), credentialId=Buffer.from(randomUUID()).toString('base64url');
+    const owner=await createAccount(`${randomUUID()}@example.com`), credentialId=Buffer.from(randomUUID()).toString('base64url');
     const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
     const jwk=publicKey.export({format:'jwk'});
     const cose=new Map<number,number|Uint8Array>([[1,2],[3,-7],[-1,1],[-2,new Uint8Array(Buffer.from(jwk.x!,'base64url'))],[-3,new Uint8Array(Buffer.from(jwk.y!,'base64url'))]]);

@@ -1,8 +1,8 @@
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
 import * as store from './store.js';
-export async function beginRegistration(rpID:string,accountID?:string,token?:string){
- const account=accountID?await store.getAccount(accountID):await store.createAccount();
+export async function beginRegistration(rpID:string,accountID?:string,token?:string,email?:string){
+ const account=accountID?await store.getAccount(accountID):await store.createAccount(email);
  if(!account)throw Error('Account not found');
  const credentials=await store.getCredentials(account.id);
  if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');

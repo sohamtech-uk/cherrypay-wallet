@@ -1,7 +1,7 @@
 -- Durable B3-B7 contract; wallet provisioning remains gated on B1/B2 authorization.
 CREATE TABLE wallet_onchain_accounts (
   id TEXT COLLATE "C" PRIMARY KEY,
-  owner UUID NOT NULL REFERENCES wallet_accounts(id),
+  owner TEXT NOT NULL REFERENCES wallet_accounts(id),
   network TEXT NOT NULL DEFAULT 'TESTNET' CHECK (network = 'TESTNET'),
   address TEXT COLLATE "C" NOT NULL UNIQUE,
   policy TEXT NOT NULL,

@@ -14,10 +14,49 @@ type Cred = {id:string;public_key:string;counter:string|number;transports:string
 function credentials(rows: any[]): Cred[] {
   return rows.map(r => ({...r, transports: typeof r.transports === 'string' ? JSON.parse(r.transports) : r.transports}));
 }
-export async function createAccount() {
-  const id = randomUUID(), userID = randomBytes(32).toString('base64url');
+export async function createAccount(email?: string) {
+  if (!email) throw Error('EMAIL_REQUIRED');
+  const id = normalizeEmail(email), userID = randomBytes(32).toString('base64url');
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[id,userID]);
   return {id,webauthn_user_id:userID};
+}
+/** Normalized email is the canonical account ID and permanent ownership key. */
+export function normalizeEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (email.length > 254 || !/^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/.test(email)) throw Error('INVALID_EMAIL');
+  return email;
+}
+export async function getAccountByEmail(value: string) {
+  const email = normalizeEmail(value);
+  const { rows } = await pool.query<{id:string;webauthn_user_id:string}>(
+    'SELECT id,webauthn_user_id FROM wallet_accounts WHERE id=$1', [email]);
+  return rows[0];
+}
+export async function createEmailVerification(accountID: string) {
+  const code = String(randomBytes(4).readUInt32BE(0) % 100000000).padStart(8, '0');
+  await pool.query(
+    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at",
+    [accountID,hashToken(code)]);
+  return code;
+}
+export async function verifyEmail(accountID: string, code: string) {
+  if (!/^[0-9]{8}$/.test(code)) return false;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const verified = await client.query(
+      "DELETE FROM wallet_email_verifications WHERE account_id=$1 AND token_hash=$2 AND expires_at>NOW() RETURNING account_id",
+      [accountID,hashToken(code)]);
+    if (verified.rowCount !== 1) { await client.query('ROLLBACK'); return false; }
+    await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1', [accountID]);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}
+export async function emailForAccount(accountID: string) {
+  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>('SELECT id AS email, email_verified_at FROM wallet_accounts WHERE id=$1',[accountID]);
+  return rows[0];
 }
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
   if(!token || !/^[a-zA-Z0-9_-]{40,100}$/.test(token)) return null;

@@ -27,7 +27,7 @@ integration('PostgreSQL explicit contract-route upgrades', () => {
   afterAll(async () => { await pool.end(); await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); });
   async function fixture() {
     const manifest = manifestFixture();
-    const owner = randomUUID();
+    const owner = `${randomUUID()}@example.com`;
     const account = { ...manifest.accounts[0], owner, walletId: randomUUID(), address: StrKey.encodeContract(randomBytes(32)) };
     await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)', [owner, randomUUID()]);
     await pool.query("INSERT INTO wallet_onchain_accounts(id,owner,network,address,policy,routes,created_at) VALUES($1,$2,'TESTNET',$3,$4,'[\"classic\"]'::jsonb,$5)", [account.walletId, owner, account.address, 'd'.repeat(64), Date.now()]);
