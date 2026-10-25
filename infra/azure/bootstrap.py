@@ -130,7 +130,8 @@ def main():
                 if attempt==29: raise
                 time.sleep(5)
         def password(name):
-            return az("keyvault","secret","show","--vault-name",c["vaultName"],"--name",name,"--query","value") if name in names else secrets.token_hex(32)
+            # Guarantee Azure's character-category requirements while retaining 256 random bits.
+            return az("keyvault","secret","show","--vault-name",c["vaultName"],"--name",name,"--query","value") if name in names else "Cp1_"+secrets.token_hex(32)
         if any(r["name"]==c["serverName"] and r["type"]=="Microsoft.DBforPostgreSQL/flexibleServers" for r in existing_resources) and not {"postgres-administrator-password","postgres-runtime-password"}.issubset(names):
             raise ValueError("Existing database credentials are missing; restore the wallet secrets before retrying")
         admin_password=password("postgres-administrator-password")
