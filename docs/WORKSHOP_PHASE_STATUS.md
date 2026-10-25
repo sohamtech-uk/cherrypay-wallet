@@ -143,3 +143,28 @@ checks before merging. All work remains Testnet-only.
 The native SAC transfer constructor and event decoder already accept contract addresses. This change extends explicitly provisioned wallet routes from `['classic']` to `['classic','contract']`, but only for verified pinned smart accounts with independent recovery. For C→C sends, the payment service requires the destination to be another registered wallet whose **current** on-chain signer policy agrees with its stored policy and has an independent backup. Unknown C-address contracts are not accepted; no unrestricted contract invocation is exposed. The same verified RPC event/indexing flow supplies balances and history for C destinations. Provisioning existing `['classic']` rows will fail closed rather than silently upgrade their policy; operator review is required before updating route records.
 
 **Recovery remains gated:** existing PinnedAccountAdapter checks two separately owned on-chain signer rules and a separate backup public key. Physical on-chain backup enrollment and a second-device lost-primary recovery drill still require owner participation, deployed Testnet accounts, and confirmed transaction hashes; code cannot silently create or attest those actions.
+
+
+### Operator acceptance for C-to-C and individual backup recovery
+
+For each participating user, enroll two distinct WebAuthn P-256 credentials via the profile. This is off-chain only; it does not enroll an on-chain signer.
+
+Using a reviewed deployed smart-account contract, enroll the user's backup credential as a separate permanent on-chain rule, confirm its transaction, and perform a second-device lost-primary recovery exercise. The owner must approve this with their authenticators.
+
+Record distinct deployment and recovery transaction hashes per user in a secure Testnet payment manifest. Check primary and backup credentials, separate rule IDs, and signer public keys against confirmed on-chain state.
+
+Operator read-only audit (never put relayer secrets or manifest into Git):
+
+```sh
+
+cd apps/api
+
+WALLET_PAYMENT_MANIFEST=/secure/path/testnet-payment-manifest.json node --import tsx src/smart-account/recovery-audit-cli.ts
+
+```
+
+The audit reads both on-chain signer rules per wallet and fails if any user's backup is missing, rotated, or incompatible. It neither enrolls a signer nor proves successful device-loss recovery.
+
+For approved C-to-C sends, provision the reviewed classic+contract destination routes, and validate a live transfer between two separately enrolled and recovered users. Verify both wallets' balances, exact native-SAC event identity and receipt; repeat with a rotated recipient signer and confirm fail-closed behavior.
+
+No live recovery drill or funded C-to-C transaction evidence is claimed by this PR.
