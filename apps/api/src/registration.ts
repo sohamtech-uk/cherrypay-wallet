@@ -1,10 +1,11 @@
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
 import * as store from './store.js';
-export async function beginRegistration(rpID:string,accountID?:string,token?:string){
- const account=accountID?await store.getAccount(accountID):await store.createAccount();
+export async function beginRegistration(rpID:string,accountID?:string,token?:string,email?:string){
+ const account=accountID?await store.getAccount(accountID):await store.createAccount(email);
  if(!account)throw Error('Account not found');
  const credentials=await store.getCredentials(account.id);
+ if(!accountID && email) throw Error('EMAIL_VERIFICATION_REQUIRED');
  if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');
  const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',supportedAlgorithmIDs:[-7],authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
  return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
