@@ -30,6 +30,6 @@ export function validateKitV080DeploymentConfig(config: {
   requireThat(StrKey.isValidContract(config.verifierAddress) && config.verifierAddress === TESTNET_V080.verifierAddress, 'UNAPPROVED_WEBAUTHN_VERIFIER');
   requireThat(config.verifierWasmHash === TESTNET_V080.verifierWasmHash, 'UNAPPROVED_VERIFIER_WASM');
   // The older integration manifest is intentionally blocked; never substitute it.
-  requireThat(SMART_ACCOUNT_KIT.accountWasmHash !== config.accountWasmHash, 'LEGACY_MANIFEST_MUST_REMAIN_BLOCKED');
+  requireThat(config.accountWasmHash !== String(SMART_ACCOUNT_KIT.accountWasmHash), 'LEGACY_MANIFEST_MUST_REMAIN_BLOCKED');
   return Object.freeze({ ...TESTNET_V080, validated: true as const });
 }
