@@ -29,8 +29,8 @@ export function getExchangeMailConfig(env: NodeJS.ProcessEnv = process.env): Exc
  const saveToSentItems = parseBool(env.EXCHANGE_MAIL_SAVE_TO_SENT_ITEMS, true);
  const fallbackToMail = parseBool(env.EXCHANGE_MAIL_FALLBACK_TO_MAIL, false);
  if (!/^[0-9a-f-]{36}$/i.test(tenantId) || !/^[0-9a-f-]{36}$/i.test(clientId) || !clientSecret ||
-  !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(sender) ||
-  !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(invoiceFromEmail) ||
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender) ||
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceFromEmail) ||
   !Number.isFinite(timeout) || timeout < 1 || timeout > 60 ||
   !Number.isFinite(connectTimeout) || connectTimeout < 1 || connectTimeout > timeout ||
   graphBaseUrl !== 'https://graph.microsoft.com/v1.0' || fallbackToMail)
