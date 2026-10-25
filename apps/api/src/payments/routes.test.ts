@@ -65,3 +65,18 @@ it('advertises approval capability only when configured and fails closed on begi
     expect(malformed.statusCode).toBe(400);
   } finally {await server.close();}
 });
+
+it('only queries the indexer after session ownership checks and never labels its data verified',async()=>{
+  const indexer={account:vi.fn(async(address:string)=>({address,nativeXlmStroops:'999',transactions:[],previousCursor:null,hasPreviousPage:false,balancesTruncated:false}))};
+  for(const [subject,status] of [[null,401],['bob',404],['alice',200]] as const) {
+    const server=Fastify(), service=new PaymentService(store,mockChain(),mockPolicy(),1);
+    await registerPaymentRoutes(server,{service,indexer,origin:headers.origin,authenticate:async()=>subject?{subject}:null});
+    const result=await server.inject({url:'/api/v1/wallets/wallet-1/indexed'});
+    expect(result.statusCode).toBe(status);
+    if(status===200)expect(result.json()).toMatchObject({verified:false,source:'wallet-backend',account:{address:wallet.address}});
+    else expect(indexer.account).not.toHaveBeenCalled();
+    await server.close();
+  }
+  expect(indexer.account).toHaveBeenCalledTimes(1);
+  expect(indexer.account).toHaveBeenCalledWith(wallet.address);
+});
