@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sendVerificationEmail } from './email-delivery.js';
 import { getExchangeMailConfig } from './config.js';
 
-const config = {tenantId:'11111111-1111-4111-8111-111111111111',clientId:'22222222-2222-4222-8222-222222222222',clientSecret:'test-secret',sender:'wallet@example.com'};
+const config = {tenantId:'11111111-1111-4111-8111-111111111111',clientId:'22222222-2222-4222-8222-222222222222',clientSecret:'test-secret',sender:'wallet@example.com',senderName:'Cherry Wallet',invoiceFromEmail:'wallet@example.com',invoiceFromName:'Cherry Wallet',graphBaseUrl:'https://graph.microsoft.com/v1.0',timeoutMs:10000,connectTimeoutMs:5000,saveToSentItems:true,fallbackToMail:false};
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Exchange Online verification mail', () => {
