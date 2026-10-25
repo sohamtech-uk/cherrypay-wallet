@@ -7,7 +7,7 @@ Customer-controlled, **Stellar Testnet-only** XLM smart-wallet MVP. Contains pas
 1. Copy `.env.example` to `.env`; set a strong local `DB_PASSWORD`.
 2. Run `docker compose up --build -d`.
 3. Visit http://localhost:5174; API health: http://localhost:3001/health.
-4. See [local Docker setup](docs/LOCAL_DOCKER.md), [Testnet payment runtime](docs/TESTNET_PAYMENT_RUNTIME.md), [PostgreSQL DB implementation](docs/POSTGRESQL_WALLET_BACKEND_MIGRATION.md) and [Stellar Wallet Backend evaluation](docs/STELLAR_WALLET_BACKEND.md).
+4. See [local Docker setup](docs/LOCAL_DOCKER.md), [PostgreSQL DB implementation](docs/POSTGRESQL_WALLET_BACKEND_MIGRATION.md) and [Stellar Wallet Backend evaluation](docs/STELLAR_WALLET_BACKEND.md).
 
 The application uses its own **PostgreSQL 17** database and versioned SQL migrations. Stellar Wallet Backend is a *separate optional indexer* with its own PostgreSQL/TimescaleDB storage; do not merge vendor indexer schemas into the Cherry Pay database.
 

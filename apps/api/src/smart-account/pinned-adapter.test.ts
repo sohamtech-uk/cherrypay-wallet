@@ -64,16 +64,17 @@ function fixture() {
   const p=key('primary'),b=key('backup');
   const approved:ApprovedAccount={walletId:wallet.id,owner:wallet.owner,address:wallet.address,accountWasmHash:ACCOUNT_V080_HASH,verifierAddress:verifier,verifierWasmHash:'a'.repeat(64),primaryRuleId:1,backupRuleId:2,primaryCredentialId:p.credential.id,backupCredentialId:b.credential.id,deploymentTransactionHash:'b'.repeat(64),recoveryTransactionHash:'c'.repeat(64)};
   const rule=(id:number,k:typeof p):ContextRule=>({id,name:'rule',context_type:{tag:'Default',values:undefined},signers:[{tag:'External',values:[verifier,credentialKeyData(k.credential)]}],signer_ids:[id],policies:[],policy_ids:[],valid_until:undefined});
-  const rules=[rule(1,p),rule(2,b)];let count=2;
+  const rules=[rule(1,p),rule(2,b)];let count=2,omitIds=false,lookupLedger=100;
   const spec=new Client({contractId:wallet.address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec;
   const server={getNetwork:vi.fn(),getLedgerEntries:vi.fn(),simulateTransaction:vi.fn(async(tx:{toEnvelope:()=>xdr.TransactionEnvelope})=>{
     const fn=tx.toEnvelope().v1().tx().operations()[0].body().invokeHostFunctionOp().hostFunction().invokeContract();
     const name=fn.functionName().toString();
-    const retval=name==='auth_digest'?xdr.ScVal.scvBytes(hash(fn.args()[0].toXDR())):name==='get_context_rules_count'?xdr.ScVal.scvU32(count):spec.nativeToScVal(rules.find(r=>r.id===fn.args()[0].u32()),xdr.ScSpecTypeDef.scSpecTypeUdt(new xdr.ScSpecTypeUdt({name:'ContextRule'})));
-    return {_parsed:true,id:'1',latestLedger:100,events:[],minResourceFee:'0',transactionData:new SorobanDataBuilder(),result:{auth:[],retval}};
+    let retval=name==='get_signer_id'?xdr.ScVal.scvU32(rules.find(r=>spec.funcArgsToScVals('get_signer_id',{signer:r.signers[0]})[0].toXDR('base64')===fn.args()[0].toXDR('base64'))!.signer_ids[0]):name==='auth_digest'?xdr.ScVal.scvBytes(hash(fn.args()[0].toXDR())):name==='get_context_rules_count'?xdr.ScVal.scvU32(count):spec.nativeToScVal(rules.find(r=>r.id===fn.args()[0].u32()),xdr.ScSpecTypeDef.scSpecTypeUdt(new xdr.ScSpecTypeUdt({name:'ContextRule'})));
+    if(omitIds && name==='get_context_rule')retval=xdr.ScVal.scvMap(retval.map()!.filter(e=>!['signer_ids','policy_ids'].includes(e.key().sym().toString())));
+    return {_parsed:true,id:'1',latestLedger:name==='get_signer_id'?lookupLedger:100,events:[],minResourceFee:'0',transactionData:new SorobanDataBuilder(),result:{auth:[],retval}};
   })};
   const adapter=new PinnedAccountAdapter(server as unknown as AccountRpc,[approved],async()=>[p.credential,b.credential]);
-  return {adapter,approved,rules,p,b,server,setCount:(v:number)=>{count=v;}};
+  return {adapter,approved,rules,p,b,server,setCount:(v:number)=>{count=v;},hydrate:(ledger=100)=>{omitIds=true;lookupLedger=ledger;}};
 }
 describe('pinned on-chain rules and owned credentials',()=>{
   it('reads fresh code/rules and encodes only the exact primary payment',async()=>{
@@ -84,6 +85,35 @@ describe('pinned on-chain rules and owned credentials',()=>{
     await expect(f.adapter.encode(w,a,assertion(f.b,description.challenge).value)).rejects.toThrow('UNAUTHORIZED_TRANSFER_CREDENTIAL');
     expect(verifyCurrentContractCode).toHaveBeenCalledWith(f.server,verifier,'a'.repeat(64));
     f.rules[0].name='changed';await expect(f.adapter.describe(w,a)).rejects.toThrow('BINDING_CHANGED');
+  });
+  it('hydrates omitted IDs and invalidates reviewed authorization when a registry ID changes',async()=>{
+    const f=fixture();f.hydrate();
+    const policy=await f.adapter.current(wallet.address),w={...wallet,policy:policy.fingerprint};
+    const a={id:'a',walletId:w.id,from:w.address,policy:w.policy,intent,prepared:{authXdr:entry(true).toXDR('base64'),expirationLedger:130,expiresAt:Date.now()+60000}} as Attempt;
+    const plan=await f.adapter.describe(w,a);expect(plan.credentialIds).toEqual([f.p.credential.id]);
+    expect(await f.adapter.encode(w,a,assertion(f.p,plan.challenge).value)).toBeTruthy();
+    f.rules[0].signer_ids[0]=42;
+    expect((await f.adapter.current(wallet.address)).fingerprint).not.toBe(policy.fingerprint);
+    await expect(f.adapter.describe(w,a)).rejects.toThrow('ACCOUNT_POLICY_BINDING_CHANGED');
+  });
+  it('preserves existing fingerprints for rules that already include their IDs',async()=>{
+    const f=fixture();
+    const spec=new Client({contractId:wallet.address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec;
+    const raw=f.rules.map(r=>spec.nativeToScVal(r,xdr.ScSpecTypeDef.scSpecTypeUdt(new xdr.ScSpecTypeUdt({name:'ContextRule'}))).toXDR('base64'));
+    const legacy=createHash('sha256').update(JSON.stringify([PASSPHRASE,wallet.address,ACCOUNT_V080_HASH,verifier,'a'.repeat(64),...raw])).digest('hex');
+    expect((await f.adapter.current(wallet.address)).fingerprint).toBe(legacy);
+  });
+  it('refuses registry lookups from another ledger, expired snapshots and missing registry IDs',async()=>{
+    const mixed=fixture();mixed.hydrate(101);await expect(mixed.adapter.current(wallet.address)).rejects.toThrow('INCONSISTENT_POLICY_SNAPSHOT');
+    const stale=fixture();stale.hydrate(99);await expect(stale.adapter.current(wallet.address)).rejects.toThrow('STALE_POLICY_READ');
+    const missing=fixture();missing.hydrate();
+    const original=missing.server.simulateTransaction.getMockImplementation()!;
+    missing.server.simulateTransaction.mockImplementation(async tx=>{
+      const result=await original(tx),fn=tx.toEnvelope().v1().tx().operations()[0].body().invokeHostFunctionOp().hostFunction().invokeContract();
+      if(fn.functionName().toString()==='get_signer_id')result.result.retval=xdr.ScVal.scvVoid();
+      return result;
+    });
+    await expect(missing.adapter.current(wallet.address)).rejects.toThrow('SIGNER_ID_UNRESOLVED');
   });
   it('rejects multisig-as-recovery, extra policies/rules, signer mismatch and expiring rules',async()=>{
     for(const mutate of [(f:ReturnType<typeof fixture>)=>f.rules[0].signers.push(f.rules[1].signers[0]),(f:ReturnType<typeof fixture>)=>f.rules[0].policies.push(verifier),(f:ReturnType<typeof fixture>)=>f.setCount(3),(f:ReturnType<typeof fixture>)=>f.rules[0].signers[0]=f.rules[1].signers[0],(f:ReturnType<typeof fixture>)=>f.rules[1].valid_until=150]){const f=fixture();mutate(f);await expect(f.adapter.current(wallet.address)).rejects.toThrow();}

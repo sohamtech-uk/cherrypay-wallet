@@ -5,6 +5,5 @@ RUN npm ci --include=dev --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 COPY migrations ./migrations
-COPY scripts ./scripts
 EXPOSE 3001
 CMD ["npm", "run", "dev"]

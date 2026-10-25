@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { attestAccountCode } from './onchain-code.js';
 import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { sessionAccount } from '../store.js';
 import { createTestnetRpc } from './deployment-evidence.js';
+import { TESTNET_PASSPHRASE } from '../config.js';
 
 /**
  * Read-only integration boundary until a contract implementation and
@@ -25,7 +25,7 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
       deploymentEnabled: false,
       spendingEnabled: false,
       recoveryEnabled: false,
-      reason: 'PATCHED_CODE_CANDIDATE_SELECTED_SIGNER_AND_AUTH_ADAPTER_NOT_VERIFIED',
+      reason: 'SDK_VERSION_MIGRATION_AND_ONCHAIN_ATTESTATION_REQUIRED',
     };
   });
 
@@ -45,9 +45,10 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     const { address } = request.params as { address: string };
     if (!StrKey.isValidContract(address)) return reply.code(400).send({ error: 'INVALID_CONTRACT_ADDRESS' });
     try {
-      const code = await attestAccountCode(address, createTestnetRpc());
-      // Code identity is NOT signer authorization or account ownership.
-      return { address, network: 'TESTNET', codeVerified: code.verified, wasmSha256: code.wasmSha256, verified: false, recoveryReady: false, spendingEnabled: false };
+      const network = await createTestnetRpc().getNetwork();
+      if (network.passphrase !== TESTNET_PASSPHRASE) return reply.code(503).send({ error: 'RPC_NETWORK_MISMATCH' });
+      // Never assert ownership, deployment, or recovery without on-chain proof.
+      return { address, network: 'TESTNET', verified: false, recoveryReady: false, spendingEnabled: false };
     } catch {
       return reply.code(503).send({ error: 'STELLAR_RPC_UNAVAILABLE' });
     }
