@@ -1,6 +1,36 @@
 # wallet.cherrymoney.co.uk on Azure (Stellar Testnet)
 
-The deployment source is implemented; provisioning still requires the target Azure configuration and dedicated database. No Azure resource, DNS record, or certificate has been created by adding these files. The shared ChatGPT implementation plan was inaccessible; this deployment implements the repository's existing Testnet scope.
+The deployment source includes a private PostgreSQL provisioning path. Adding these files alone creates no Azure resources, DNS records or certificates. The shared ChatGPT implementation plan was inaccessible; this deployment implements the repository's existing Testnet scope.
+
+## Provision a dedicated database and wallet app
+
+`python infra/azure/bootstrap.py --config /path/outside/checkout/wallet-target.json` performs a read-only preflight. Add `--apply` to provision from that exact clean commit. The JSON configuration contains only these non-secret fields:
+
+```json
+{
+  "subscriptionId": "selected-subscription-id",
+  "resourceGroup": "dedicated-wallet-resource-group",
+  "location": "uksouth",
+  "environmentId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.App/managedEnvironments/...",
+  "registryId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.ContainerRegistry/registries/...",
+  "vnetId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Network/virtualNetworks/...",
+  "appsSubnetPrefix": "actual-existing-container-apps-subnet-prefix",
+  "postgresSubnetPrefix": "verified-unused-private-subnet-prefix",
+  "serverName": "globally-unique-wallet-postgresql-name",
+  "vaultName": "globally-unique-wallet-vault-name",
+  "appName": "dedicated-wallet-container-app-name"
+}
+```
+
+Preflight checks the selected subscription, resource types, region, existing subnet ranges and environment membership. It refuses overlapping subnets, a mismatched existing wallet subnet, unrelated resource groups and unrelated network security groups. The script does not switch Azure user, tenant or subscription. Keep the config outside the checkout; a dirty checkout is rejected.
+
+The apply path creates a dedicated wallet resource group, Key Vault, a B1ms PostgreSQL 17 server with 32 GiB storage, private DNS and a delegated subnet. Backups retain seven days and storage can grow automatically; this is a small Testnet configuration without high availability. It incurs Azure charges. The database has no public access. A new subnet NSG permits PostgreSQL connections from the existing Container Apps subnet and the PostgreSQL subnet, and denies other clients on port 5432. Existing subnets and existing application databases are not rewritten.
+
+Administrator and runtime passwords are generated inside the provisioning process and persisted in the wallet vault before database creation begins. Retries reuse the stored values. Neither password is shown in chat, logs, command arguments or GitHub secrets. Temporary ARM parameter files are mode 0600 and removed after each operation. The operator receives Secrets Officer on this new vault; the app identity receives Secrets User on the single `wallet-database-url` secret. Separate runtime/bootstrap identities receive AcrPull on the selected registry and no access to Cherry Money's other vaults.
+
+An operator-only Container Apps job connects through the private network to create `wallet_runtime`, grant connection and schema-create permissions, and verify the runtime credentials. The role cannot create roles/databases or bypass row policies. Existing privileged roles are rejected and an existing password is never silently rotated. This initialization job is deleted after success; its database administrator secret is never passed to the web/API app. If initialization fails, its definition remains for diagnosis and retry; delete that temporary job once fixed. Runtime and administrator passwords remain recoverable in the wallet vault.
+
+The script then builds API/web images in ACR, pins both digests, deploys the app with the Key Vault reference, and waits for Testnet readiness. It prints the actual generated hostname and domain verification ID for the DNS steps below. It does not alter DNS automatically or enable payments.
 
 ## Runtime
 
@@ -24,7 +54,8 @@ Configure the `azure-wallet-testnet` GitHub environment with:
 | Variable | `AZURE_CONTAINER_ENVIRONMENT_ID` | Existing managed environment resource ID |
 | Variable | `AZURE_CONTAINER_REGISTRY` | ACR resource name, not its hostname |
 | Variable | `AZURE_REGISTRY_IDENTITY_ID` | User-assigned managed identity resource ID with ACR image-pull access |
-| Secret | `WALLET_DATABASE_URL` | Dedicated wallet PostgreSQL connection URL |
+| Variable | `WALLET_DATABASE_SECRET_URL` | Preferred: wallet Key Vault secret URL created by bootstrap |
+| Secret | `WALLET_DATABASE_URL` | Alternative connection URL when not using Key Vault; configure only one source |
 
 Scope OIDC federation to `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet`, and restrict that environment's deployment branches to `develop`. Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
 

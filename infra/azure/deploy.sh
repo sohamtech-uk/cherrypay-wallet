@@ -2,9 +2,11 @@
 set -euo pipefail
 # Never enable shell tracing: WALLET_DATABASE_URL is a secret.
 cd "$(dirname "$0")/../.."
-for name in AZURE_RESOURCE_GROUP AZURE_LOCATION AZURE_CONTAINER_APP AZURE_CONTAINER_ENVIRONMENT_ID AZURE_REGISTRY_IDENTITY_ID AZURE_CONTAINER_REGISTRY WALLET_DATABASE_URL; do
+for name in AZURE_RESOURCE_GROUP AZURE_LOCATION AZURE_CONTAINER_APP AZURE_CONTAINER_ENVIRONMENT_ID AZURE_REGISTRY_IDENTITY_ID AZURE_CONTAINER_REGISTRY; do
   if [[ -z "${!name:-}" ]]; then printf 'Missing configuration: %s\n' "$name" >&2; exit 1; fi
 done
+if [[ -z "${WALLET_DATABASE_URL:-}" && -z "${WALLET_DATABASE_SECRET_URL:-}" ]]; then echo 'A database URL or Key Vault secret URL is required' >&2; exit 1; fi
+if [[ -n "${WALLET_DATABASE_URL:-}" && -n "${WALLET_DATABASE_SECRET_URL:-}" ]]; then echo 'Configure only one database secret source' >&2; exit 1; fi
 command -v az >/dev/null
 command -v node >/dev/null
 az account show --query id -o tsv >/dev/null
@@ -40,7 +42,7 @@ WALLET_WEB_IMAGE="$WALLET_REGISTRY_SERVER/cherrypay-wallet-web@$web_digest"
 node --input-type=module <<'JS'
 import fs from 'node:fs';
 const e=process.env;
-const values={location:e.AZURE_LOCATION,appName:e.AZURE_CONTAINER_APP,environmentId:e.AZURE_CONTAINER_ENVIRONMENT_ID,registryIdentityId:e.AZURE_REGISTRY_IDENTITY_ID,registryServer:e.WALLET_REGISTRY_SERVER,apiImage:e.WALLET_API_IMAGE,webImage:e.WALLET_WEB_IMAGE,databaseUrl:e.WALLET_DATABASE_URL,customDomains:JSON.parse(fs.readFileSync(`${e.WALLET_AZURE_TMP}/domains.json`))};
+const values={location:e.AZURE_LOCATION,appName:e.AZURE_CONTAINER_APP,environmentId:e.AZURE_CONTAINER_ENVIRONMENT_ID,registryIdentityId:e.AZURE_REGISTRY_IDENTITY_ID,registryServer:e.WALLET_REGISTRY_SERVER,apiImage:e.WALLET_API_IMAGE,webImage:e.WALLET_WEB_IMAGE,databaseUrl:e.WALLET_DATABASE_URL??'',databaseSecretUrl:e.WALLET_DATABASE_SECRET_URL??'',customDomains:JSON.parse(fs.readFileSync(`${e.WALLET_AZURE_TMP}/domains.json`))};
 fs.writeFileSync(`${e.WALLET_AZURE_TMP}/parameters.json`,JSON.stringify({parameters:Object.fromEntries(Object.entries(values).map(([k,value])=>[k,{value}]))}),{mode:0o600});
 JS
 # No connection strings in command arguments, outputs, or deployment names.

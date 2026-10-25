@@ -18,7 +18,11 @@ jobs:
         with:
           node-version: '24'
       - name: Validate Azure template
-        run: az bicep build --file infra/azure/wallet.bicep --outfile /tmp/wallet-arm.json
+        run: |
+          for template in infra/azure/*.bicep; do
+            az bicep build --file "$template" --outfile "/tmp/$(basename "$template" .bicep)-arm.json"
+          done
+          python -m unittest discover -s infra/azure -p 'test_*.py'
       - name: Production container smoke test
         run: bash scripts/test-production-containers.sh
   deploy:
@@ -52,4 +56,5 @@ jobs:
           AZURE_REGISTRY_IDENTITY_ID: ${{ vars.AZURE_REGISTRY_IDENTITY_ID }}
           AZURE_CONTAINER_REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
           WALLET_DATABASE_URL: ${{ secrets.WALLET_DATABASE_URL }}
+          WALLET_DATABASE_SECRET_URL: ${{ vars.WALLET_DATABASE_SECRET_URL }}
         run: bash infra/azure/deploy.sh
