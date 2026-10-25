@@ -4,6 +4,7 @@ import { StrKey } from '@stellar/stellar-sdk';
 import { sessionAccount, db } from '../store.js';
 import { createTestnetRpc } from './deployment-evidence.js';
 import { TESTNET_PASSPHRASE } from '../config.js';
+import { testnetRelayer } from './relayer.js';
 
 /**
  * Read-only integration boundary until a contract implementation and
@@ -35,6 +36,12 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     const { rows } = await db.query<{ status: string; contract_address: string | null; transaction_hash: string | null }>(
       'SELECT status, contract_address, transaction_hash FROM wallet_deployment_jobs WHERE account_id=$1', [accountID]);
     return rows.length ? { status: rows[0].status, address: rows[0].contract_address, transactionHash: rows[0].transaction_hash, deploymentEnabled: false } : { status: 'NOT_STARTED', deploymentEnabled: false };
+  });
+
+  app.get('/api/v1/smart-account/relayer', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const relayer = testnetRelayer();
+    return { network: 'TESTNET', configured: relayer.configured, publicKey: relayer.configured ? relayer.publicKey : null, deploymentEnabled: false };
   });
 
   app.get('/api/v1/smart-account/capabilities', async (_request, reply) => {
