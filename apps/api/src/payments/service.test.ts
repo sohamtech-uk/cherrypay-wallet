@@ -129,3 +129,29 @@ it('does not broadcast if the repository cannot confirm the signed-byte commit',
   await expect(service.approve('alice', wallet.id, first.id, 'signed-auth')).rejects.toThrow('commit acknowledgement lost');
   expect(chain.submit).not.toHaveBeenCalled();
 });
+
+
+describe('C-address-to-C-address Testnet payments', () => {
+  it('accepts a separately provisioned recovered recipient and rejects stale recipient policy', async () => {
+    const { StrKey } = await import('@stellar/stellar-sdk');
+    const recipient = { ...wallet, id: 'receiver-wallet', owner: 'bob', address: StrKey.encodeContract(Buffer.alloc(32, 22)), routes: ['classic','contract'] as ('classic'|'contract')[] };
+    store.register({ ...wallet, routes:['classic','contract'] }); store.register(recipient);
+    const cIntent = { ...intent, destination: recipient.address };
+    expect((await service.create('alice',wallet.id,cIntent,'cc-test-key-0000001')).status).toBe('awaiting_approval');
+    expect(policies.current).toHaveBeenCalledWith(recipient.address);
+  });
+  it('rejects unprovisioned C recipients without preparing a transaction', async () => {
+    const { StrKey } = await import('@stellar/stellar-sdk');
+    store.register({ ...wallet, routes:['classic','contract'] });
+    await expect(service.create('alice',wallet.id,{...intent,destination:StrKey.encodeContract(Buffer.alloc(32,23))},'cc-test-key-0000002')).rejects.toMatchObject({code:'UNVERIFIED_CONTRACT_RECIPIENT'});
+    expect(chain.prepare).not.toHaveBeenCalled();
+  });
+  it('rejects a recipient whose recovery policy has changed', async () => {
+    const { StrKey } = await import('@stellar/stellar-sdk');
+    const recipient={...wallet,id:'receiver-wallet',owner:'bob',address:StrKey.encodeContract(Buffer.alloc(32,24)),routes:['classic','contract'] as ('classic'|'contract')[]};
+    store.register({ ...wallet, routes:['classic','contract'] });store.register(recipient);
+    vi.mocked(policies.current).mockResolvedValueOnce({fingerprint:'rotated-policy',recoveryReady:true});
+    await expect(service.create('alice',wallet.id,{...intent,destination:recipient.address},'cc-test-key-0000003')).rejects.toMatchObject({code:'RECIPIENT_RECOVERY_OR_POLICY_UNREADY'});
+    expect(chain.prepare).not.toHaveBeenCalled();
+  });
+});
