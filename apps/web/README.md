@@ -1,31 +1,48 @@
-# Cherry Pay Wallet UI — A1–A3
+# Cherry Pay Wallet UI
 
-Testnet-only React/TypeScript frontend scaffold, navigation, onboarding information, wallet overview, security placeholder, and watch-only Testnet classic-account balance lookup.
+Stellar Testnet wallet UI with passkey profiles, authenticated wallet discovery,
+indexed balances, receive instructions, payment review/approval and verified history.
 
 ## Run
+
 ```sh
 cd apps/web
-npm install
+npm ci
 npm run dev
 npm test
+npm run lint
 npm run build
 ```
 
-## Important security / functional limits
-- **No wallet creation or passkey registration is implemented yet.** Those actions are deliberately disabled until B1–B2 provide verified backend/contract integrations.
-- No signing, spending, production network selection or secret key storage.
-- Existing **classic G-address** balances are read from public Stellar Testnet Horizon; **C-address** smart-account balance requires a SAC-compatible adapter and currently shows a clear unsupported message.
-- Watch-only address is held in sessionStorage (public address only), never private keys or passkey material.
-- Testnet is hardcoded. No Mainnet fallback.
-- Address regex is a UI shape check, not full StrKey checksum validation; backend must validate authoritatively.
+The browser uses same-origin `/api/v1` endpoints. Configure the Vite proxy and the
+API's exact `WALLET_ORIGIN` as described in
+[Payment UI integration](../../docs/PAYMENT_UI_INTEGRATION.md).
 
-This implements frontend foundation A1–A3 **partially**; the live passkey wallet creation and smart-account dashboard remain blocked on Contributor B's implementation.
+## Profiles and wallet activation
 
+Create a passkey profile in the connection panel and keep the public account ID.
+The UI remembers only that ID in localStorage; session tokens stay in memory.
+An interrupted registration can be recovered by signing in with the same ID and
+the created passkey. Additional enrollment requires an authenticated session.
+New passkeys use ES256/P-256 for compatibility with the selected Stellar verifier.
 
-## Existing authenticated wallets
+Enrollment does not deploy a wallet, install an on-chain signer or prove recovery.
+The pilot operator must deploy and approve the account and independent recovery
+configuration, then link it using the trusted provisioning CLI. After activation,
+reconnect: one owned wallet opens automatically; multiple wallets require selection.
+See [Testnet startup](../../docs/TESTNET_STARTUP.md).
 
-The connection form now supports passkey login for existing account and deployed
-wallet IDs, authenticated indexed balance, payment attempt/history reads, and a
-trusted transaction-signer injection point. See
-[Payment UI integration](../../docs/PAYMENT_UI_INTEGRATION.md) for endpoint mapping,
-proxy configuration and B1/B2 prerequisites. Initial wallet creation remains pending.
+The overview reads indexed balances and verified transfers from the connected
+wallet. Amounts retain all seven XLM decimal places. Stale/missing snapshots and
+partial failures remain explicit, with refresh recovery. Classic watch-only lookup
+is separate and grants no spending authority.
+
+Receive QR/copy appears only for a verified supported route. Send reviews exact
+amounts and maximum fees and uses the configured WebAuthn transaction approval API.
+Unknown outcomes retain their persisted attempt key; checking status never resends.
+Sessions expire after at most 30 minutes; refresh requires a new passkey sign-in.
+No Mainnet fallback, browser-held relayer secret or fabricated transaction is used.
+
+Automated tests cover enrollment cancellation/lost responses, session replacement,
+expiry races, exact amounts, stale balances, verified receipts and payment recovery.
+Actual device recovery and end-to-end Testnet payment acceptance remain required.

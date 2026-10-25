@@ -1,11 +1,25 @@
 # Authenticated payment UI integration
 
-The frontend now connects existing accounts using the API's WebAuthn authentication
-options/verify flow. Account ID and deployed wallet ID are public identifiers, not
-credentials. They must come from B1/B2 onboarding; a watch-only address never grants
-spending authority. Session bearer tokens stay in memory and are revoked on logout.
-Refresh requires signing in again. Public pending-attempt keys remain in localStorage
-so signing in again can recover a previous payment.
+The frontend supports initial passkey registration, existing-profile authentication
+and session-bound additional-passkey enrollment. Account IDs are public identifiers,
+not credentials. A new account ID is saved in localStorage before the passkey prompt,
+so a lost verification response can be recovered by reconnecting with that ID.
+Only public account IDs and pending-attempt keys are stored there. Session bearer
+tokens stay in memory and are revoked on logout; refresh requires signing in again.
+Storage/clipboard failures leave a selectable account ID and manual-copy instructions.
+
+Registration requests and verification both allow only ES256/P-256, matching the
+selected Stellar verifier. Additional enrollment replaces the browser session and
+revokes its previous token. Late verification/metadata responses cannot restore a
+disconnected or expired session. Cancellation before backup verification leaves
+the original session usable; an uncertain verification requires reconnecting.
+Enrolled credential count is a sign-in capability, never proof of on-chain recovery.
+
+The connected overview uses indexed balance and verified history APIs, exact
+integer-stroop formatting, ledger/time metadata, a balance age warning and refresh.
+Balance and activity failures are independent. Missing data is not a zero balance.
+Classic watch-only lookup is separate and validates StrKey checksums; it never
+connects a spending wallet or displays smart-account ownership.
 
 ## API adapter
 
@@ -36,23 +50,25 @@ retried. Non-2xx responses do not become successful or empty records.
 
 ## B1/B2 handoff
 
-`<App signer={signer} />` accepts a trusted `TransferSigner`. It receives the exact
-persisted attempt ID, wallet ID, intent, fee, authorization XDR, expiration ledger
-and expiry. It must validate and sign that Soroban authorization using the deployed
-contract's passkey format and return signed authorization XDR. A generic login
-assertion must never be substituted. The server still enforces authorization binding.
-No default signer or fabricated contract policy is included. Sending stays disabled
-without this adapter; default backend payment routes also remain gated.
+Initial registration creates an identity profile, not a deployed smart account.
+The pilot operator must supply accepted deployment and independent recovery evidence,
+configure the pinned runtime, and link the owned wallet using the trusted provisioning
+CLI. See [Testnet startup](TESTNET_STARTUP.md). The browser discovers owned wallet IDs
+through authenticated `/api/v1/wallets`; users do not enter a wallet ID manually.
 
-The current wallet endpoint does not expose a receive route. The adapter therefore
-does not infer one from outgoing `supportedDestinations`. Once B1/B2 validates funding,
-the endpoint may return `receive: { address, route: 'contract' | 'classic', instructions }`.
-The adapter validates address/route equality before exposing QR/copy instructions.
-Until then the receive screen remains explicitly unavailable. Initial registration,
-contract deployment, wallet discovery and backup recovery remain Sunil's B1/B2 work.
+Configured wallet metadata advertises `approvalMode: 'webauthn'`, enabling the
+server-mediated approval flow below. A separately verified integration can still
+supply `<App signer={signer} />`; its exact Soroban authorization must bind the
+persisted intent, fee and expiration. A login assertion is not payment approval.
+The browser always prefers advertised WebAuthn approval over an injected signer.
 
-Existing integrations can still supply `<App paymentAdapter={adapter} />` directly;
-that suppresses the built-in connection form.
+Receive instructions require explicit `receive: { address, route, instructions }`
+metadata from the verified receive-route provider. Outbound destination support is
+not funding evidence. Additional profile enrollment neither installs an on-chain
+signer nor executes a recovery/rotation ceremony; those acceptance steps remain open.
+
+Existing integrations can supply `<App paymentAdapter={adapter} />` directly;
+that suppresses the built-in profile panel.
 
 ## Running and verification
 
@@ -68,7 +84,7 @@ Frontend CI checks build, lint and tests. Tests cover precision, response valida
 verified receipts, passkey-session connection/logout, missing signer, recovery keys
 before preparation, timeout recovery, preview mutation and rejected signing.
 A real browser/Testnet create → recover → receive → send → verify acceptance run is
-still required after the B1/B2 adapter and receive metadata are supplied. No live
+still required after approved deployment configuration is supplied. No live
 transfer or contract deployment is claimed by these adapter tests.
 
 
