@@ -25,7 +25,7 @@ function job(row: Row): DeploymentJob {
   return { owner: row.account_id, status: row.status, descriptor: row.descriptor ?? undefined,
     prepared: row.signed_xdr && row.transaction_hash && row.expires_at ? { signedXdr: row.signed_xdr, transactionHash: row.transaction_hash, expiresAt: Number(row.expires_at) } : undefined,
     leaseToken: row.lease_token ?? undefined, confirmedLedger: row.confirmed_ledger ? Number(row.confirmed_ledger) : undefined,
-    signerRuleId: row.signer_rule_id ?? undefined, bindingVerified: row.binding_verified_at !== null, failureCode: row.failure_code ?? undefined };
+    signerRuleId: row.signer_rule_id ?? undefined, bindingVerified: row.binding_verified_at != null, failureCode: row.failure_code ?? undefined };
 }
 async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -33,7 +33,7 @@ async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<
   catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
-/** The deployment key must be dedicated to this worker, not the payment relayer.
+/** Dedicated deployment fee source, separate from the payment relayer.
  * No SQL transaction or row lock is held while an RPC request executes. */
 export class PostgresDeploymentStore implements DeploymentStore {
   constructor(readonly publicKey: string, readonly pool: Pool = db, readonly limit = 100) {
@@ -54,7 +54,7 @@ export class PostgresDeploymentStore implements DeploymentStore {
         const d = existing.rows[0].descriptor;
         validateDeploymentDescriptor(d);
         requireThat(d.owner === owner && d.deployerPublicKey === this.publicKey && credentials.rows.some(c => c.id === d.credentialId && c.public_key === d.credentialPublicKey), 'DEPLOYMENT_CREDENTIAL_BINDING_CHANGED');
-        return job(existing.rows[0]); // No reset, re-sign, new salt or implicit retry.
+        return job(existing.rows[0]);
       }
       requireThat(!existing.rows[0] || ['PENDING','AWAITING_PASSKEY'].includes(existing.rows[0].status), 'LEGACY_DEPLOYMENT_REQUIRES_REVIEW');
       const deployed = await client.query('SELECT id FROM wallet_onchain_accounts WHERE owner=$1 LIMIT 1', [owner]);
@@ -102,7 +102,6 @@ export class PostgresDeploymentStore implements DeploymentStore {
   }
   async checkpoint(j: DeploymentJob, p: PreparedDeployment): Promise<DeploymentJob> {
     requireThat(j.descriptor && j.leaseToken && /^[a-f0-9]{64}$/.test(p.transactionHash) && p.signedXdr.length > 0 && Number.isSafeInteger(p.expiresAt), 'INVALID_DEPLOYMENT_CHECKPOINT');
-    // This atomic statement commits BEFORE the worker is allowed to broadcast.
     const result = await this.pool.query<Row>(`UPDATE wallet_deployment_jobs SET status='SUBMITTED',signed_xdr=$3,transaction_hash=$4,expires_at=$5,contract_address=$6,updated_at=NOW(),failure_code=NULL
       WHERE account_id=$1 AND lease_token=$2 AND lease_until>NOW() AND status='PENDING' AND signed_xdr IS NULL AND descriptor=$7::jsonb RETURNING *`,
     [j.owner, j.leaseToken, p.signedXdr, p.transactionHash, p.expiresAt, j.descriptor.address, JSON.stringify(j.descriptor)]);
@@ -114,6 +113,9 @@ export class PostgresDeploymentStore implements DeploymentStore {
     const confirmed = outcome.status === 'CONFIRMED';
     if (confirmed) requireThat(Number.isSafeInteger(outcome.ledger) && outcome.ledger > 0 && outcome.signerRuleId === 0, 'INVALID_DEPLOYMENT_BINDING_EVIDENCE');
     await transaction(this.pool, async client => {
+      // Match claim's lock order: sponsor first, then job. Never invert it under concurrency.
+      const locked = await client.query<{account_id:string|null}>('SELECT account_id FROM wallet_deployment_sponsors WHERE public_key=$1 FOR UPDATE', [this.publicKey]);
+      requireThat(locked.rows[0]?.account_id === j.owner, 'DEPLOYMENT_SPONSOR_RESERVATION_CHANGED');
       const result = await client.query(`UPDATE wallet_deployment_jobs SET status=$3,confirmed_ledger=$4,signer_rule_id=$5,
         binding_verified_at=CASE WHEN $3='CONFIRMED' THEN NOW() ELSE NULL END, failure_code=$6,
         lease_token=NULL,lease_until=NULL,updated_at=NOW()
