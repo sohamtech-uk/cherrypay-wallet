@@ -86,3 +86,24 @@ Rollback: disable composition/payment routes/worker and revert this PR. Preserve
 - https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getTransaction
 - https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/sendTransaction
 - https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md
+
+
+## Authenticated application composition
+
+`buildApp` in `apps/api/src/app.ts` accepts an optional trusted `PaymentService`.
+When present, payment routes authenticate every request through PostgreSQL-backed
+`sessionAccount`; revoked/expired sessions cannot access a wallet, and wallet ownership
+is checked independently. The monitor starts when Fastify becomes ready and drains
+its active tick on close. The executable closes the database only after that drain.
+
+After the B1/B2 deployment and signer-policy gate has passed, trusted startup code can
+construct `createPaymentRuntime({ relayerSecret, policyReader, startLedger })` and pass
+it as `buildApp({ payments: runtime })`. The runtime defaults to
+`PostgresPaymentRepository`; a supplied repository remains available for tests.
+Initialize database migrations before listening. Never construct the policy reader
+from request fields or substitute database passkeys for on-chain policy verification.
+
+The default executable still supplies no payment runtime and returns 503 for payment
+routes. This change does not deploy a contract or establish transaction-bound WebAuthn
+signing. Sunil's verified contract/policy adapter remains the prerequisite for enabling
+transfers and connecting the frontend. Wallet deployment remains disabled.
