@@ -31,7 +31,7 @@ if(app && app.properties.template.containers.some(c=>c.env?.some(v=>v.name==='WA
 fs.writeFileSync(`${root}/domains.json`,JSON.stringify(app?.properties.configuration.ingress.customDomains??[]));
 JS
 for component in api web; do
-  az acr build --registry "$AZURE_CONTAINER_REGISTRY" --image "cherrypay-wallet-$component:$WALLET_RELEASE_SHA" --file Dockerfile.production "apps/$component" --only-show-errors
+  az acr build --registry "$AZURE_CONTAINER_REGISTRY" --image "cherrypay-wallet-$component:$WALLET_RELEASE_SHA" --file "apps/$component/Dockerfile.production" "apps/$component" --only-show-errors
 done
 export WALLET_API_IMAGE WALLET_WEB_IMAGE
 api_digest=$(az acr repository show -n "$AZURE_CONTAINER_REGISTRY" --image "cherrypay-wallet-api:$WALLET_RELEASE_SHA" --query digest -o tsv)
