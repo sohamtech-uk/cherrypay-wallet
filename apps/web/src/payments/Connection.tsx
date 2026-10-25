@@ -14,6 +14,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const deadline = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const poll = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const deploymentRequest = useRef(0);
   const generation = useRef(0);
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
@@ -29,13 +30,13 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const [deploymentStatus, setDeploymentStatus] = useState('');
   const [deployment, setDeployment] = useState<DeploymentView | null>(null);
   useEffect(() => () => {
-    generation.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
+    generation.current++; deploymentRequest.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
     const abandoned = token.current; token.current = undefined;
     if (abandoned) void revoke(abandoned).catch(() => { /* Server expiry bounds an interrupted logout. */ });
   }, []);
   const active = (id: number) => generation.current === id && !!token.current && Date.now() < deadline.current;
   function clearSession(message = '') {
-    generation.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
+    generation.current++; deploymentRequest.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
     setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
@@ -49,17 +50,17 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function loadDeployment(id: number, reserve = false) {
     clearTimeout(poll.current);
     if (!active(id)) return;
-    const session = token.current;
+    const session = token.current, request = ++deploymentRequest.current;
     try {
       const value = await apiClient(() => session)('smart-account/deployment', reserve ? {} : undefined);
-      if (!active(id)) return;
+      if (!active(id) || request !== deploymentRequest.current) return;
       const view = parseDeployment(value);
       setDeployment(view); setDeploymentStatus(view.status);
       if (view.enabled && ['PENDING','SUBMITTED'].includes(view.status)) {
         poll.current = setTimeout(() => { void loadDeployment(id); }, 5000);
       }
     } catch (e) {
-      if (!active(id)) return;
+      if (!active(id) || request !== deploymentRequest.current) return;
       if (e instanceof ApiError && e.status === 401) { clearSession('Your session expired. Reconnect with your passkey.'); return; }
       setDeployment(null); setDeploymentStatus('UNAVAILABLE');
       setError('Provisioning status is unavailable. Your passkey profile remains connected. Refresh deployment status to retry.');
@@ -70,8 +71,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     let owned: OwnedWallet[];
     try { owned = await discoverWallets(apiClient(() => session)); }
     catch (e) {
-      // A new primary-controlled contract may exist before payment/recovery activation.
-      // Only this explicit disabled-runtime response is an empty discovery fallback.
+      // Only the explicit disabled payment runtime permits this empty-discovery fallback.
       if (!(e instanceof ApiError && e.status === 503 && e.code === 'PAYMENT_INTEGRATION_NOT_CONFIGURED')) throw e;
       owned = [];
     }
@@ -89,7 +89,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     }
     const previous = token.current;
     if (previous) { onConnect(null); setConnected(false); }
-    clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
+    clearTimeout(expiry.current); clearTimeout(poll.current); deploymentRequest.current++; setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
     setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
@@ -123,7 +123,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function register(additional: boolean) {
     if (lock.current) return;
     if (additional && !active(generation.current)) { clearSession('Reconnect before adding a passkey.'); return; }
-    const id = ++generation.current; clearTimeout(poll.current); lock.current = true; setBusy(true); setError(''); setNotice('');
+    const id = ++generation.current; clearTimeout(poll.current); deploymentRequest.current++; lock.current = true; setBusy(true); setError(''); setNotice('');
     const api = apiClient(() => token.current);
     let verifying = false;
     try {
@@ -189,7 +189,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
           <label htmlFor="deployed-contract">Deployed C-address</label><input id="deployed-contract" value={deployment.address} readOnly/>
           <p>Deployment ledger: {deployment.ledger}. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.transactionHash}`} target="_blank" rel="noreferrer">View deployment transaction</a></p>
           <p>Payments and funding instructions remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
-        </> : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
+        </> : <p role="status">No deployed wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'On-chain deployment is not enabled yet or its status could not be verified. Do not fund a predicted address.'}</p>}
         <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
       </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       <p>Add an independent passkey on another device or security key. Off-chain enrollment alone does not add a backup on-chain signer or verify recovery.</p>
