@@ -21,6 +21,10 @@ The upstream testnet guide advertises:
 - Account query root: `accountByAddress(address: String!)` with `balances`, `transactions` and cursor pagination.
 - Hosted API authentication: where `CLIENT_AUTH_PUBLIC_KEYS` is configured, follow upstream request-signing docs, not a generic static API token.
 
+## Existing optional GraphQL client
+
+`apps/api/src/indexing/wallet-backend.ts` contains a **read-only**, opt-in GraphQL adapter with exact XLM decimal-to-stroops conversion, bounded queries and address validation; unit tests are in `wallet-backend.test.ts`. It is deliberately not exposed via HTTP or used to mark transactions verified. Do not connect it to the live wallet flow until a tested upstream release and data-parity check are available.
+
 ## Cherry Pay integration contract
 
 1. Deploy upstream Wallet Backend separately; do **not** point it at the Cherry Pay application database.

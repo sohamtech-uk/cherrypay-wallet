@@ -12,6 +12,7 @@ Cherry Pay has **no existing MySQL data**. This is a clean database replacement.
 - Ported passkey credential/challenge/session persistence to PostgreSQL transactions, row locks and one-time challenge consumption.
 - Added `PostgresPaymentRepository` implementing the B3–B7 asynchronous persistence contract. It is **not wired to enable spending** until on-chain B1/B2 security gates pass.
 - Added PostgreSQL integration tests to the API CI service.
+- Added an optional read-only `WalletBackendClient` GraphQL adapter (`apps/api/src/indexing/wallet-backend.ts`). It does **not** replace the application’s RPC confirmation logic or enable payment endpoints.
 - Retained the existing Stellar Testnet RPC, signed-XDR checkpointing and transfer verification logic.
 
 The app owns `wallet_*` tables in a dedicated PostgreSQL database. **Never write directly to Stellar Wallet Backend's separate PostgreSQL/TimescaleDB tables.**
