@@ -8,7 +8,7 @@ import { PASSPHRASE, requireThat, type Attempt, type PolicyReader, type Wallet }
 import { addressCredentials, assertTransferAuthorization } from '../payments/stellar.js';
 import type { ContractPasskeyCodec } from '../payments/passkey-approval.js';
 import { verifyCurrentContractCode } from './receive-route.js';
-import { readHydratedContextRule, simulationReader, type HydratedContextRule, type RawContractRead, type RuleSpec } from './context-rules.js';
+import { readHydratedContextRule, simulationReader, withConsistentSnapshot, type HydratedContextRule, type RawContractRead, type RuleSpec } from './context-rules.js';
 
 // Source-reviewed ABI: OpenZeppelin/stellar-contracts v0.8.0 at ddc327eb92d63709436da3a8455f641c2d5476c5.
 // Hash identified by upstream Smart Account Kit's auth-digest-scheme.ts.
@@ -84,7 +84,8 @@ export class PinnedAccountAdapter implements PolicyReader, ContractPasskeyCodec 
     for(const a of accounts)requireThat(a.accountWasmHash===ACCOUNT_V080_HASH && StrKey.isValidContract(a.address) && StrKey.isValidContract(a.verifierAddress) && /^[a-f0-9]{64}$/.test(a.verifierWasmHash) && /^[a-f0-9]{64}$/.test(a.deploymentTransactionHash) && /^[a-f0-9]{64}$/.test(a.recoveryTransactionHash) && a.deploymentTransactionHash!==a.recoveryTransactionHash && a.primaryCredentialId!==a.backupCredentialId && a.primaryRuleId!==a.backupRuleId && [a.primaryRuleId,a.backupRuleId].every(id=>Number.isInteger(id)&&id>=0&&id<=0xffffffff),'INVALID_APPROVED_ACCOUNT');
     this.approved=new Map(accounts.map(a=>[a.address,Object.freeze({...a})]));
   }
-  private async read(address:string) {
+  private read(address:string) {return withConsistentSnapshot(()=>this.readSnapshot(address));}
+  private async readSnapshot(address:string) {
     const a=this.approved.get(address);requireThat(a,'UNAPPROVED_ACCOUNT');
     const [accountCode,verifierCode]=await Promise.all([verifyCurrentContractCode(this.server,address,a.accountWasmHash),verifyCurrentContractCode(this.server,a.verifierAddress,a.verifierWasmHash)]);
     const spec=new Client({contractId:address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec as unknown as RuleSpec;

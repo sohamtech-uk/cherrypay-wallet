@@ -124,8 +124,13 @@ describe('pinned on-chain rules and owned credentials',()=>{
   });
   it('refuses mixed ledger snapshots and RPC failure',async()=>{
     const f=fixture();
+    // A single mixed snapshot is discarded and the whole read retried.
     vi.mocked(verifyCurrentContractCode).mockResolvedValueOnce({ledger:99,wasmHash:ACCOUNT_V080_HASH});
+    await expect(f.adapter.current(wallet.address)).resolves.toMatchObject({recoveryReady:true});
+    // A snapshot that never becomes consistent is refused.
+    vi.mocked(verifyCurrentContractCode).mockResolvedValue({ledger:99,wasmHash:ACCOUNT_V080_HASH});
     await expect(f.adapter.current(wallet.address)).rejects.toThrow('INCONSISTENT_POLICY_SNAPSHOT');
+    vi.mocked(verifyCurrentContractCode).mockResolvedValue({ledger:100,wasmHash:ACCOUNT_V080_HASH});
     f.server.simulateTransaction.mockRejectedValueOnce(Error('RPC down'));
     await expect(f.adapter.current(wallet.address)).rejects.toThrow('RPC down');
   });
