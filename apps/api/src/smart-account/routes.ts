@@ -87,6 +87,21 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     return { network: 'TESTNET', publicKey: rows[0]?.public_key ?? null };
   });
 
+  // Both address types are independently visible; a reserved C-address is not deployed.
+  app.get('/api/v1/smart-account/addresses', async (request, reply) => {
+    const accountID = await sessionAccount(request.headers.authorization?.replace(/^Bearer /, ''));
+    if (!accountID) return reply.code(401).send({ error: 'AUTHENTICATION_REQUIRED' });
+    const [classic, smart] = await Promise.all([
+      db.query<{public_key:string}>('SELECT public_key FROM wallet_classic_addresses WHERE account_id=$1', [accountID]),
+      db.query<{contract_address:string|null;status:string}>('SELECT contract_address,status FROM wallet_deployment_jobs WHERE account_id=$1', [accountID])
+    ]);
+    reply.header('Cache-Control', 'no-store');
+    return { network: 'TESTNET', wallets: [
+      { type: 'G', address: classic.rows[0]?.public_key ?? null, status: classic.rows.length ? 'BOUND' : 'NOT_CREATED', paymentsEnabled: false },
+      { type: 'C', address: smart.rows[0]?.contract_address ?? null, status: smart.rows[0]?.status ?? 'NOT_STARTED', paymentsEnabled: false }
+    ] };
+  });
+
   app.get('/api/v1/smart-account/relayer', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const relayer = testnetRelayer();
