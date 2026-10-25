@@ -10,7 +10,9 @@ param registryServer string
 param apiImage string
 param webImage string
 @secure()
-param databaseUrl string
+param databaseUrl string = ''
+@description('Versionless Key Vault URL; runtime identity must have access to this secret only.')
+param databaseSecretUrl string = ''
 @description('Preserved by deploy.sh; do not clear existing certificate bindings on subsequent releases.')
 param customDomains array = []
 
@@ -27,7 +29,7 @@ resource wallet 'Microsoft.App/containerApps@2025-01-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       maxInactiveRevisions: 10
-      secrets: [{ name: 'wallet-database-url', value: databaseUrl }]
+      secrets: [empty(databaseSecretUrl) ? { name: 'wallet-database-url', value: databaseUrl } : { name: 'wallet-database-url', keyVaultUrl: databaseSecretUrl, identity: registryIdentityId }]
       registries: [{ server: registryServer, identity: registryIdentityId }]
       ingress: {
         external: true
