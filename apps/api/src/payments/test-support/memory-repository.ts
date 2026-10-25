@@ -1,4 +1,4 @@
-/** TEST DOUBLE ONLY. No durability, MySQL driver, migrations or production export. */
+/** TEST DOUBLE ONLY. No durability, PostgreSQL driver, migrations or production export. */
 import { randomUUID } from 'node:crypto';
 import { digest, requireThat, TERMINAL, type Attempt, type Intent, type TransferEvent, type Wallet } from '../model.js';
 import { validateAttemptUpdate, validateEventRecord, type BalanceSnapshot, type PaymentRepository } from '../repository.js';
@@ -16,7 +16,7 @@ export class MemoryRepository implements PaymentRepository {
   async get(id: string) { return this.read(id); }
   async byKey(id: string, key: string) { return copy([...this.attempts.values()].find(a => a.walletId === id && a.idempotencyKey === key)); }
   async create(wallet: Wallet, intent: Intent, key: string) {
-    // No await inside this fake's atomic block. Real MySQL MUST use transactions/row locks.
+    // No await inside this fake's atomic block. Real PostgreSQL MUST use transactions/row locks.
     requireThat(/^[a-zA-Z0-9_-]{16,128}$/.test(key), 'INVALID_IDEMPOTENCY_KEY', 400);
     const prior = [...this.attempts.values()].find(a => a.walletId === wallet.id && a.idempotencyKey === key);
     if (prior) { requireThat(prior.requestDigest === digest(intent), 'IDEMPOTENCY_CONFLICT'); return copy(prior); }
