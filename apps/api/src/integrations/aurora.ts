@@ -67,7 +67,8 @@ export class AuroraService {
   }
   async quote(input: AuroraInput): Promise<AuroraQuote> {
     const amount = validateInput(input);
-    const tokens = await this.read(this.endpoint('tokens'));
+    const catalog = object(await this.read(this.endpoint('tokens')));
+    const tokens = catalog.tokens;
     if (!Array.isArray(tokens)) throw new IntegrationError('ROUTE_UNAVAILABLE', 'Unable to verify the supported route.', 503);
     const available = tokens.map(object);
     const supported = (assetId: string, blockchain: string, decimals: number) => available.some(t => t.assetId === assetId && t.blockchain === blockchain && t.symbol === 'USDC' && t.decimals === decimals);

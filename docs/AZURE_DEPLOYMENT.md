@@ -56,12 +56,15 @@ Configure the `azure-wallet-testnet` GitHub environment with:
 | Variable | `AZURE_REGISTRY_IDENTITY_ID` | User-assigned managed identity resource ID with ACR image-pull access |
 | Variable | `WALLET_DATABASE_SECRET_URL` | Preferred: wallet Key Vault secret URL created by bootstrap |
 | Secret | `WALLET_DATABASE_URL` | Alternative connection URL when not using Key Vault; configure only one source |
+| Secret | `AURORA_INTENTS_API_KEY` | Optional Studio Swap API key, API container only; preserve the same key on later releases |
 
 Scope OIDC federation to `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet`, and restrict that environment's deployment branches to `develop`. Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
 
 The `Wallet Azure production images` workflow builds and smoke-tests both production images on pull requests and develop pushes. The deployment job runs only on manual dispatch for `develop`, after its container checks pass. GitHub requires the workflow file on the repository's default branch before exposing `workflow_dispatch`; until that is arranged, an authorized operator can run the same `bash infra/azure/deploy.sh` from a clean, checked-out develop commit in Azure Cloud Shell or an authenticated CLI. Set the configuration above in the environment through your secret manager. The script requires Azure CLI (with Container Apps and Bicep support), Node 24, Git and curl. Do not enable `set -x`.
 
 The script builds API/web images with ACR, resolves their SHA256 digests, sends the database URL as a secure ARM parameter in a temporary mode-0600 file, and deletes the file on exit. It preserves custom-domain certificate bindings on updates and refuses an existing app without the wallet/Testnet tags. Deployment does not become successful until the generated Azure hostname's readiness endpoint confirms Testnet. No live wallet payment or physical passkey ceremony is implied by a successful infrastructure deployment.
+
+The optional Aurora key is also a secure ARM parameter and a Container Apps secret, referenced only by the API container. The template fixes `AURORA_INTENTS_NETWORK=TESTNET` and `AURORA_INTENTS_ENABLED=false`: the current provider route uses mainnet and cannot fund this wallet. A key enables read-only recovery of existing mainnet swaps only. The deployment script refuses to remove an existing Aurora key or overwrite an activated Aurora runtime. Supply the same key through the secret manager on every release after configuration; never put it in source or command arguments.
 
 ## DNS and HTTPS
 

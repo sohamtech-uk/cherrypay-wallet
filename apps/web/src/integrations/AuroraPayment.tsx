@@ -17,7 +17,7 @@ const labels: RecordStatusLabels = {
 };
 type RecordStatusLabels = { [K in SwapStatus['status']]: string };
 
-export function AuroraPayment() {
+export function AuroraPayment({ onNetwork }: { onNetwork?: (network: 'MAINNET' | 'TESTNET') => void } = {}) {
   const [capabilities, setCapabilities] = useState<Capabilities>();
   const [configError, setConfigError] = useState('');
   const [configNonce, setConfigNonce] = useState(0);
@@ -42,9 +42,9 @@ export function AuroraPayment() {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     const controller = new AbortController(); setConfigError('');
-    void auroraClient.capabilities(controller.signal).then(v => { if (!controller.signal.aborted) setCapabilities(v); }).catch(() => { if (!controller.signal.aborted) setConfigError('Unable to check Aurora availability.'); });
+    void auroraClient.capabilities(controller.signal).then(v => { if (!controller.signal.aborted) { setCapabilities(v); onNetwork?.(v.network); } }).catch(() => { if (!controller.signal.aborted) setConfigError('Unable to check Aurora availability.'); });
     return () => controller.abort();
-  }, [configNonce]);
+  }, [configNonce, onNetwork]);
   useEffect(() => {
     const sync = () => {
       try { setRecord(readRecord()); setStorageError(''); }
@@ -82,18 +82,18 @@ export function AuroraPayment() {
   }
   const displayedQuote = record?.quote ?? quote;
   const expired = !!displayedQuote && Date.parse(displayedQuote.expiresAt) <= clock + 30_000;
-  const canFund = record && record.reviewed && !storageError && !expired && status?.status === 'PENDING_DEPOSIT' && clock - Date.parse(status.checkedAt) < 30_000 && capabilities?.enabled;
+  const canFund = capabilities?.network === 'MAINNET' && record && record.reviewed && !storageError && !expired && status?.status === 'PENDING_DEPOSIT' && clock - Date.parse(status.checkedAt) < 30_000 && capabilities?.enabled;
   const changed = () => { setQuote(undefined); setAccepted(false); };
   const qr = record ? `ethereum:${BASE_USDC_CONTRACT}@8453/transfer?address=${record.quote.depositAddress}&uint256=${record.quote.amountIn}` : '';
   return <section className="card payment-screen integration-screen">
     <span className="eyebrow">AURORA INTENTS</span><h1>Pay from another chain</h1>
-    <p>Currently Base USDC → Stellar USDC only. Fees reduce the destination amount; review the quote before funding.</p>
-    <div className="integration-notice"><strong>Mainnet · real USDC</strong><p>This route uses Base and Stellar mainnet. It cannot fund your Cherry Testnet wallet. Maximum 100 USDC per payment.</p></div>
+    <p>{capabilities?.network === 'TESTNET' ? 'The wallet is configured for Stellar Testnet. Aurora’s advertised Base USDC → Stellar USDC route uses mainnet and cannot fund this wallet.' : 'Currently Base USDC → Stellar USDC only. Fees reduce the destination amount; review the quote before funding.'}</p>
+    <div className="integration-notice">{capabilities?.network === 'TESTNET' ? <><strong>Stellar Testnet · cross-chain funding unavailable</strong><p>A configured API key does not create Testnet support. No funding address or QR is available for this network.</p></> : capabilities?.network === 'MAINNET' ? <><strong>Mainnet · real USDC</strong><p>This route uses Base and Stellar mainnet. It cannot fund your Cherry Testnet wallet. Maximum 100 USDC per payment.</p></> : <strong>Checking the configured network…</strong>}</div>
     <p><Link to="/recipient-intelligence">Check recipient intelligence</Link> before choosing a payment.</p>
-    {configError ? <p role="alert">{configError} <button className="secondary-button" onClick={() => setConfigNonce(n => n + 1)}>Retry availability check</button></p> : !capabilities ? <p role="status">Checking Aurora availability…</p> : !capabilities.enabled && <p className="integration-notice" role="status">Aurora funding is not enabled for this deployment. You can check an existing swap when the status service is available.</p>}
+    {configError ? <p role="alert">{configError} <button className="secondary-button" onClick={() => setConfigNonce(n => n + 1)}>Retry availability check</button></p> : !capabilities ? <p role="status">Checking Aurora availability…</p> : capabilities.network === 'MAINNET' && !capabilities.enabled && <p className="integration-notice" role="status">Aurora funding is not enabled for this deployment. You can check an existing swap when the status service is available.</p>}
     <p ref={alert} tabIndex={-1} className="error" role="alert">{error || storageError}</p>
     {notice && <p role="status">{notice}</p>}
-    {!record && !storageError && <form onSubmit={e => { e.preventDefault(); void run(async () => {
+    {!record && !storageError && capabilities?.network === 'MAINNET' && <form onSubmit={e => { e.preventDefault(); void run(async () => {
       if (!capabilities?.enabled || readRecord()) throw Error('Funding is disabled or an existing swap needs a status check.');
       const input = { recipient: recipient.trim(), refundTo: refundTo.trim(), amount: amount.trim() };
       validateInput(input); setQuote(undefined); setAccepted(false);
@@ -145,7 +145,7 @@ export function AuroraPayment() {
       })}>Finish viewing this swap</button>}
       <p>Do not create a replacement or top up an incomplete deposit. For an uncertain or failed outcome, keep the deposit address and source receipt for <a href="https://docs.intents.aurora.dev/getting-started/integration-best-practices/handling-support-cases" target="_blank" rel="noreferrer">Aurora support</a>.</p>
     </section>}
-    {!record && <details><summary>Recover an existing swap</summary><form onSubmit={e => { e.preventDefault(); void run(async () => {
+    {!record && <details><summary>Recover an existing swap</summary><p>Read-only recovery of a previously funded mainnet swap. This cannot fund a Testnet wallet.</p><form onSubmit={e => { e.preventDefault(); void run(async () => {
       if (!capabilities?.statusAvailable || !evmAddress(recoveryAddress.trim())) throw Error('Enter the existing Base deposit address when the status service is available.');
       const recovered = await auroraClient.status(recoveryAddress.trim());
       if (!mounted.current) return;
