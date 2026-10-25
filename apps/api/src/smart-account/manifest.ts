@@ -34,7 +34,7 @@ export function parsePaymentManifest(value: unknown): PaymentManifest {
   const accounts = m.accounts.map(value => {
     const a = record(value);
     fields(a, ['walletId','owner','address','accountWasmHash','verifierAddress','verifierWasmHash','primaryRuleId','backupRuleId','primaryCredentialId','backupCredentialId','deploymentTransactionHash','recoveryTransactionHash']);
-    requireThat(string(a.walletId, /^[A-Za-z0-9_-]{1,128}$/) && string(a.owner, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/), 'INVALID_MANIFEST_OWNER');
+    requireThat(string(a.walletId, /^[A-Za-z0-9_-]{1,128}$/) && typeof a.owner === 'string' && a.owner.length <= 254 && /^[^\s@A-Z]{1,64}@[^\s@A-Z]+\.[^\s@A-Z]+$/.test(a.owner), 'INVALID_MANIFEST_OWNER');
     requireThat(typeof a.address === 'string' && StrKey.isValidContract(a.address) && typeof a.verifierAddress === 'string' && StrKey.isValidContract(a.verifierAddress), 'INVALID_MANIFEST_ADDRESS');
     requireThat(a.accountWasmHash === ACCOUNT_V080_HASH && string(a.verifierWasmHash, hash), 'UNAPPROVED_MANIFEST_CODE');
     validateKitV080DeploymentConfig({networkPassphrase: TESTNET_V080.networkPassphrase, accountWasmHash: a.accountWasmHash as string, verifierAddress: a.verifierAddress as string, verifierWasmHash: a.verifierWasmHash as string});
