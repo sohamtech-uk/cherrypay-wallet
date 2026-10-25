@@ -9,7 +9,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "schema": "node --import tsx scripts/export-openapi.ts",
-    "wallet:provision": "node --import tsx src/smart-account/provision-cli.ts"
+    "wallet:provision": "node --import tsx src/smart-account/provision-cli.ts",
+    "wallet:recovery-audit": "node --import tsx src/smart-account/recovery-audit-cli.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "11.0.0",

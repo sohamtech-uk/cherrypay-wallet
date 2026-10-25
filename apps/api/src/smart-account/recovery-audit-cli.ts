@@ -4,6 +4,7 @@ import { getConfig, TESTNET_RPC_URL } from '../config.js';
 import { PaymentError } from '../payments/model.js';
 import { readPaymentManifest } from './manifest.js';
 import { PinnedAccountAdapter } from './pinned-adapter.js';
+import { verifyTestnetDeployment } from './deployment-evidence.js';
 import { readBackupRecoveryEvidence } from './recovery-evidence.js';
 
 /** Read-only operator audit. Does not run migrations, enroll keys, submit a
@@ -21,8 +22,9 @@ try {
     try {
       const current = await adapter.current(account.address);
       if (!current.recoveryReady) throw Error('ONCHAIN_BACKUP_NOT_READY');
+      await verifyTestnetDeployment({ contractAddress: account.address, wasmSha256: account.accountWasmHash, deploymentTransactionHash: account.deploymentTransactionHash, sourceCommit: 'ddc327eb92d63709436da3a8455f641c2d5476c5' }, server);
       const proof = await readBackupRecoveryEvidence(server, account, await getCredentials(account.owner), { rpID: config.rpID, origin: config.origin });
-      console.log(JSON.stringify({ ...proof, onChainBackupConfigured: true, policyFingerprint: current.fingerprint }));
+      console.log(JSON.stringify({ ...proof, onChainBackupConfigured: true, deploymentTransactionVerified: true, policyFingerprint: current.fingerprint }));
     } catch (error) {
       failed = true;
       console.error(JSON.stringify({ walletId: account.walletId, address: account.address, backupSpendVerified: false, physicalDeviceIndependenceVerified: false, error: error instanceof PaymentError ? error.code : 'RECOVERY_EVIDENCE_UNAVAILABLE_OR_INVALID' }));
