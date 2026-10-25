@@ -13,7 +13,7 @@ function quote() { return { quoteRequest: { dry: false, swapType: 'EXACT_INPUT',
 function account() { return { account_id: recipient, data: {}, balances: [{ asset_type: 'credit_alphanum4', asset_code: 'USDC', asset_issuer: USDC_ISSUER, is_authorized: true, balance: '1.0000000', buying_liabilities: '0.0000000', limit: '922337203685.4775807' }] }; }
 const tokens = [{ assetId: BASE_USDC, blockchain: 'base', symbol: 'USDC', decimals: 6 }, { assetId: STELLAR_USDC, blockchain: 'stellar', symbol: 'USDC', decimals: 7 }];
 function fixture() {
-  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) => Response.json(String(url).includes('/tokens/') ? tokens : String(url).includes('horizon.stellar.org') ? account() : quote()));
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) => Response.json(String(url).includes('/tokens/') ? { tokens, asset_stats: [] } : String(url).includes('horizon.stellar.org') ? account() : quote()));
   return { fetcher, service: new AuroraService('test-key-not-real', fetcher, () => now) };
 }
 describe('Aurora exact-input Stellar route', () => {
@@ -32,7 +32,7 @@ describe('Aurora exact-input Stellar route', () => {
   });
   it.each([USDC_ISSUER, StrKey.encodeContract(Buffer.alloc(32, 1)), 'M' + 'A'.repeat(68), recipient.slice(0, -1) + 'A'])('rejects unsupported recipient %s', recipient => { expect(() => validateInput({ ...input, recipient })).toThrow(); });
   it('fails closed when the live catalog changes or advertises the wrong decimals', async () => {
-    const { service, fetcher } = fixture(); fetcher.mockResolvedValueOnce(Response.json([{ ...tokens[0] }, { ...tokens[1], decimals: 6 }]));
+    const { service, fetcher } = fixture(); fetcher.mockResolvedValueOnce(Response.json({ tokens: [{ ...tokens[0] }, { ...tokens[1], decimals: 6 }] }));
     await expect(service.quote(input)).rejects.toThrow('not currently advertising'); expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it.each(['missing', 'unauthorized', 'memo', 'capacity'])('rejects %s trustline eligibility without creating a quote', async condition => {
@@ -41,7 +41,7 @@ describe('Aurora exact-input Stellar route', () => {
     if (condition === 'unauthorized') a.balances[0].is_authorized = false;
     if (condition === 'memo') a.data = { 'config.memo_required': 'MQ==' };
     if (condition === 'capacity') a.balances[0].limit = '2.0000000';
-    fetcher.mockResolvedValueOnce(Response.json(tokens)).mockResolvedValueOnce(Response.json(a));
+    fetcher.mockResolvedValueOnce(Response.json({ tokens, asset_stats: [] })).mockResolvedValueOnce(Response.json(a));
     await expect(service.quote(input)).rejects.toThrow(); expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it.each(['recipient', 'refund', 'amount', 'asset', 'expiry', 'minimum', 'memo'])('rejects a mismatched %s quote', async field => {
@@ -53,7 +53,7 @@ describe('Aurora exact-input Stellar route', () => {
     if (field === 'expiry') q.quote.deadline = new Date(now - 1).toISOString();
     if (field === 'minimum') q.quote.minAmountOut = '90000000';
     if (field === 'memo') Object.assign(q.quote, { depositMemo: 'required' });
-    fetcher.mockResolvedValueOnce(Response.json(tokens)).mockResolvedValueOnce(Response.json(account())).mockResolvedValueOnce(Response.json(q));
+    fetcher.mockResolvedValueOnce(Response.json({ tokens, asset_stats: [] })).mockResolvedValueOnce(Response.json(account())).mockResolvedValueOnce(Response.json(q));
     await expect(service.quote(input)).rejects.toThrow();
   });
   it('redacts upstream errors including credentials and handles timeouts and throttles', async () => {
@@ -77,14 +77,33 @@ describe('Aurora exact-input Stellar route', () => {
   });
 });
 describe('integration HTTP boundaries', () => {
+  it('blocks mainnet quotes on the default Testnet deployment even with a key and enable flag', async () => {
+    const app = Fastify(), fetcher = vi.fn<typeof fetch>();
+    await registerIntegrationRoutes(app, integrationConfig({ AURORA_INTENTS_ENABLED: 'true', AURORA_INTENTS_API_KEY: 'key' }), fetcher);
+    try {
+      expect((await app.inject('/api/v1/aurora/capabilities')).json()).toMatchObject({ enabled: false, supported: false, network: 'TESTNET' });
+      const response = await app.inject({ method: 'POST', url: '/api/v1/aurora/quotes', payload: input });
+      expect(response.statusCode).toBe(503); expect(response.json().code).toBe('AURORA_TESTNET_UNSUPPORTED'); expect(fetcher).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
   it('requires both the explicit mainnet gate and the server key, and never publishes the key', async () => {
-    for (const config of [integrationConfig({}), integrationConfig({ AURORA_INTENTS_ENABLED: 'true' }), integrationConfig({ AURORA_INTENTS_API_KEY: 'private-key' })]) {
+    for (const config of [integrationConfig({}), integrationConfig({ AURORA_INTENTS_NETWORK: 'MAINNET', AURORA_INTENTS_ENABLED: 'true' }), integrationConfig({ AURORA_INTENTS_NETWORK: 'MAINNET', AURORA_INTENTS_API_KEY: 'private-key' })]) {
       const app = Fastify(), fetcher = vi.fn<typeof fetch>(); await registerIntegrationRoutes(app, config, fetcher);
       try {
         const capabilities = await app.inject('/api/v1/aurora/capabilities'); expect(capabilities.json().enabled).toBe(false); expect(capabilities.body).not.toContain('private-key');
         expect((await app.inject({ method: 'POST', url: '/api/v1/aurora/quotes', payload: input })).statusCode).toBe(503); expect(fetcher).not.toHaveBeenCalled();
       } finally { await app.close(); }
     }
+  });
+  it('requires an explicit mainnet network before the enabled route can call Aurora', async () => {
+    const app = Fastify(), { fetcher } = fixture();
+    await registerIntegrationRoutes(app, integrationConfig({ AURORA_INTENTS_NETWORK: 'MAINNET', AURORA_INTENTS_ENABLED: 'true', AURORA_INTENTS_API_KEY: 'key' }), fetcher);
+    try {
+      expect((await app.inject('/api/v1/aurora/capabilities')).json()).toMatchObject({ enabled: true, supported: true, network: 'MAINNET' });
+      // Invalid input is rejected before provider access, even on an enabled route.
+      expect((await app.inject({ method: 'POST', url: '/api/v1/aurora/quotes', payload: { ...input, amount: '1e2' } })).statusCode).toBe(400);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally { await app.close(); }
   });
   it('permits read-only status recovery while new quotes are disabled', async () => {
     const app = Fastify(), fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ quoteResponse: quote(), status: 'REFUNDED' }));

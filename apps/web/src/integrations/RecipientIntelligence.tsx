@@ -5,7 +5,7 @@ import { loadRecipientIntelligence, type RecipientIntelligence as Result } from 
 
 export function RecipientIntelligence() {
   const [address, setAddress] = useState('');
-  const [network, setNetwork] = useState<'MAINNET' | 'TESTNET'>('MAINNET');
+  const [network, setNetwork] = useState<'MAINNET' | 'TESTNET'>('TESTNET');
   const [result, setResult] = useState<Result>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

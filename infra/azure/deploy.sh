@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Never enable shell tracing: WALLET_DATABASE_URL is a secret.
+# Never enable shell tracing: database URLs and API keys are secrets.
 cd "$(dirname "$0")/../.."
 for name in AZURE_RESOURCE_GROUP AZURE_LOCATION AZURE_CONTAINER_APP AZURE_CONTAINER_ENVIRONMENT_ID AZURE_REGISTRY_IDENTITY_ID AZURE_CONTAINER_REGISTRY; do
   if [[ -z "${!name:-}" ]]; then printf 'Missing configuration: %s\n' "$name" >&2; exit 1; fi
@@ -28,6 +28,8 @@ const env=process.env, root=env.WALLET_AZURE_TMP;
 const app=JSON.parse(fs.readFileSync(`${root}/apps.json`)).find(a=>a.name===env.AZURE_CONTAINER_APP);
 if(app && (app.tags?.application!=='cherrypay-wallet' || app.tags?.network!=='stellar-testnet')) throw Error('Refusing to overwrite an unrelated Container App');
 if(app && app.properties.template.containers.some(c=>c.env?.some(v=>v.name==='WALLET_PAYMENTS_ENABLED' && v.value==='true'))) throw Error('This bootstrap deployment cannot update an activated payment runtime');
+if(app && app.properties.template.containers.some(c=>c.env?.some(v=>v.name==='AURORA_INTENTS_ENABLED' && v.value==='true'))) throw Error('This Testnet deployment cannot update an activated Aurora runtime');
+if(app?.properties.configuration.secrets?.some(s=>s.name==='aurora-api-key') && !env.AURORA_INTENTS_API_KEY?.trim()) throw Error('Supply the existing AURORA_INTENTS_API_KEY to preserve status recovery across releases');
 fs.writeFileSync(`${root}/domains.json`,JSON.stringify(app?.properties.configuration.ingress.customDomains??[]));
 JS
 for component in api web; do
@@ -43,6 +45,7 @@ node --input-type=module <<'JS'
 import fs from 'node:fs';
 const e=process.env;
 const values={location:e.AZURE_LOCATION,appName:e.AZURE_CONTAINER_APP,environmentId:e.AZURE_CONTAINER_ENVIRONMENT_ID,registryIdentityId:e.AZURE_REGISTRY_IDENTITY_ID,registryServer:e.WALLET_REGISTRY_SERVER,apiImage:e.WALLET_API_IMAGE,webImage:e.WALLET_WEB_IMAGE,databaseUrl:e.WALLET_DATABASE_URL??'',databaseSecretUrl:e.WALLET_DATABASE_SECRET_URL??'',customDomains:JSON.parse(fs.readFileSync(`${e.WALLET_AZURE_TMP}/domains.json`))};
+values.auroraApiKey=e.AURORA_INTENTS_API_KEY?.trim()??'';
 fs.writeFileSync(`${e.WALLET_AZURE_TMP}/parameters.json`,JSON.stringify({parameters:Object.fromEntries(Object.entries(values).map(([k,value])=>[k,{value}]))}),{mode:0o600});
 JS
 # No connection strings in command arguments, outputs, or deployment names.

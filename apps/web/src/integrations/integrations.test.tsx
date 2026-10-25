@@ -42,9 +42,18 @@ describe('cross-chain review and recovery', () => {
   it('labels the full cross-chain screen and browser title as mainnet, not Testnet', async () => {
     services(); render(<MemoryRouter initialEntries={['/pay-from-another-chain']}><App paymentAdapter={null}/></MemoryRouter>);
     await screen.findByRole('heading', { name: 'Pay from another chain' });
-    expect(document.title).toBe('Cherry Wallet — Mainnet USDC');
+    await waitFor(() => expect(document.title).toBe('Cherry Wallet — Mainnet USDC'));
     expect(screen.queryByLabelText('Stellar Testnet only')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Connect with passkey' })).toBeNull();
+  });
+  it('keeps the Testnet deployment visibly on Testnet and exposes no mainnet funding form', async () => {
+    const f = services(); f.capabilities.mockResolvedValue({ enabled: false, statusAvailable: true, network: 'TESTNET' });
+    render(<MemoryRouter initialEntries={['/pay-from-another-chain']}><App paymentAdapter={null}/></MemoryRouter>);
+    await screen.findByText('Stellar Testnet · cross-chain funding unavailable');
+    expect(document.title).toBe('Cherry Pay Wallet — Testnet');
+    expect(screen.queryByLabelText('Recipient on Stellar mainnet')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review Aurora quote' })).toBeNull();
+    expect(f.preview).not.toHaveBeenCalled();
   });
   it('shows exact net output, persists before funding, and reloads status without another quote', async () => {
     const f = services(), view = mount(<AuroraPayment/>), user = await fill();
@@ -59,6 +68,15 @@ describe('cross-chain review and recovery', () => {
     expect(screen.getByLabelText('Base deposit address')).toHaveProperty('value', depositAddress);
     view.unmount(); mount(<AuroraPayment/>);
     await screen.findByText('Awaiting deposit'); expect(f.preview).toHaveBeenCalledTimes(1); expect(f.status).toHaveBeenCalledTimes(2);
+  });
+  it('recovers an existing mainnet record on Testnet without exposing deposit controls', async () => {
+    const f = services(); f.capabilities.mockResolvedValue({ enabled: false, statusAvailable: true, network: 'TESTNET' });
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify({ version: 1, reviewed: true, quote: f.quote }));
+    mount(<AuroraPayment/>);
+    await screen.findByText('Awaiting deposit');
+    expect(screen.queryByTitle('Base mainnet USDC transfer request')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy deposit address' })).toBeNull();
+    expect(f.preview).not.toHaveBeenCalled(); expect(f.status).toHaveBeenCalledTimes(1);
   });
   it('never reveals a QR when durable storage fails', async () => {
     services(); mount(<AuroraPayment/>); const user = await fill();
@@ -124,15 +142,16 @@ describe('cross-chain review and recovery', () => {
 });
 describe('recipient intelligence remains read-only', () => {
   it('makes a single GET on explicit check, reports unsupported coverage, and clears on edits', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(coverage())); vi.stubGlobal('fetch', fetcher);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ...coverage(), network: 'TESTNET' })); vi.stubGlobal('fetch', fetcher);
     const user = userEvent.setup(); mount(<RecipientIntelligence/>);
     await user.type(screen.getByLabelText('Stellar recipient address'), recipient); expect(fetcher).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Check recipient intelligence' }));
     await screen.findByRole('heading', { name: 'No Nansen assessment available' });
     expect(fetcher).toHaveBeenCalledTimes(1); expect(fetcher.mock.calls[0][1]?.method).toBe('GET');
     expect(String(fetcher.mock.calls[0][0])).toContain('/api/v1/intelligence/recipient?');
+    expect(String(fetcher.mock.calls[0][0])).toContain('network=TESTNET');
     expect(JSON.stringify(fetcher.mock.calls)).not.toMatch(/apikey|signTransaction|aurora\/quotes/);
-    await user.selectOptions(screen.getByLabelText('Stellar network'), 'TESTNET');
+    await user.selectOptions(screen.getByLabelText('Stellar network'), 'MAINNET');
     expect(screen.queryByRole('heading', { name: 'No Nansen assessment available' })).toBeNull();
   });
   it('discards an in-flight result after the address changes', async () => {
