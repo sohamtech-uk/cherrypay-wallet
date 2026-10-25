@@ -24,6 +24,7 @@ const pending = { status: 'PENDING', contract_address: null, transaction_hash: n
 describe('per-user C-address provisioning reservation', () => {
   let app: ReturnType<typeof Fastify>;
   beforeEach(async () => {
+    vi.resetAllMocks();
     mocks.sessionAccount.mockResolvedValue('owner-1');
     mocks.getCredentials.mockResolvedValue([{ id: 'primary' }, { id: 'backup' }]);
     mocks.query.mockResolvedValue({ rows: [pending] });
