@@ -5,9 +5,10 @@ import { configuredPayments } from './smart-account/manifest.js';
 import { configuredDeployments } from './smart-account/automatic-deployment.js';
 import { initializeStoreWithRetry } from './database-startup.js';
 
+type AppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
 const defaults = {
   initialize: initializeStore,
-  payments: async (env: NodeJS.ProcessEnv) => ({ ...(await configuredPayments(env)), deployments: await configuredDeployments(env) }),
+  payments: async (env: NodeJS.ProcessEnv): Promise<AppOptions> => ({ ...(await configuredPayments(env)), deployments: await configuredDeployments(env) }),
   build: buildApp,
   closeStore: () => db.end(),
 };
