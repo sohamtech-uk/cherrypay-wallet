@@ -29,9 +29,37 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     wallet={id:randomUUID(),owner:account.id,address:'C'+'B'.repeat(55),policy:'testnet-policy',routes:['classic'],createdAt:Date.now()};
     await db.query("INSERT INTO wallet_onchain_accounts(id,owner,network,address,policy,routes,created_at) VALUES ($1,$2,'TESTNET',$3,$4,$5::jsonb,$6)",[wallet.id,wallet.owner,wallet.address,wallet.policy,JSON.stringify(wallet.routes),wallet.createdAt]);
   },30_000);
-  it('applies identity and payment migrations only once',async () => {
+  it('applies identity, payment and deployment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','009_wallet_deployment_jobs.sql']);
+  });
+  it('reserves one deployment per authenticated owner without deploying or resetting its state',async()=>{
+    const owner=await createAccount(),other=await createAccount();
+    const session=await createSession(owner.id),outsider=await createSession(other.id);
+    const app=await buildApp({config:getConfig({WALLET_ORIGIN:'https://wallet.example'}),logger:false});
+    const url='/api/v1/smart-account/deployment';
+    const headers={authorization:`Bearer ${session.token}`,origin:'https://wallet.example'};
+    try {
+      expect((await app.inject({url})).statusCode).toBe(401);
+      expect((await app.inject({method:'POST',url,headers:{origin:headers.origin},payload:{}})).statusCode).toBe(401);
+      expect((await app.inject({url,headers})).json()).toEqual({status:'NOT_STARTED',deploymentEnabled:false});
+      expect((await db.query('SELECT account_id FROM wallet_deployment_jobs WHERE account_id=$1',[owner.id])).rows).toEqual([]);
+      expect((await app.inject({method:'POST',url,headers:{...headers,origin:'https://evil.example'},payload:{}})).statusCode).toBe(403);
+      const responses=await Promise.all([app.inject({method:'POST',url,headers,payload:{}}),app.inject({method:'POST',url,headers,payload:{}})]);
+      for(const result of responses) {
+        expect(result.statusCode).toBe(202);
+        expect(result.json()).toMatchObject({status:'PENDING',address:null,transactionHash:null,deploymentEnabled:false});
+      }
+      expect((await db.query('SELECT count(*)::int AS count FROM wallet_deployment_jobs WHERE account_id=$1',[owner.id])).rows[0].count).toBe(1);
+      await db.query("UPDATE wallet_deployment_jobs SET status='AWAITING_PASSKEY' WHERE account_id=$1",[owner.id]);
+      expect((await app.inject({method:'POST',url,headers,payload:{}})).json().status).toBe('AWAITING_PASSKEY');
+      expect((await app.inject({url,headers})).json()).toMatchObject({status:'AWAITING_PASSKEY',deploymentEnabled:false});
+      expect((await app.inject({url,headers:{authorization:`Bearer ${outsider.token}`}})).json()).toEqual({status:'NOT_STARTED',deploymentEnabled:false});
+      expect(await repository.walletsForOwner(owner.id)).toEqual([]);
+      await revokeSession(session.token);
+      expect((await app.inject({url,headers})).statusCode).toBe(401);
+      expect((await app.inject({method:'POST',url,headers,payload:{}})).statusCode).toBe(401);
+    } finally {await app.close();await Promise.all([revokeSession(session.token),revokeSession(outsider.token)]);}
   });
   it('persists and revokes hashed sessions',async () => {
     const {token}=await createSession(account.id);
@@ -66,6 +94,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const enrolled=await post('passkeys/registration/verify',{accountID:initial.accountID,requestID:initial.requestID,response:primary.registration(initial.options.challenge)});
       expect(enrolled.statusCode).toBe(200);const first=enrolled.json();
       expect(first).toMatchObject({verified:true,credentialCount:1,recoveryReady:false});
+      expect((await db.query('SELECT status FROM wallet_deployment_jobs WHERE account_id=$1',[first.accountID])).rows).toEqual([{status:'PENDING'}]);
       expect((await post('passkeys/registration/options',{accountID:first.accountID})).statusCode).toBe(403);
       const second=(await post('passkeys/registration/options',{accountID:first.accountID},first.token)).json();
       expect(second.options.excludeCredentials.map((c:{id:string})=>c.id)).toContain(primary.id);
@@ -77,6 +106,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const added=await post('passkeys/registration/verify',payload,first.token);
       expect(added.statusCode).toBe(200);const next=added.json();
       expect(next).toMatchObject({credentialCount:2,backupCredentialEnrolled:true,recoveryReady:false});
+      expect((await db.query('SELECT status FROM wallet_deployment_jobs WHERE account_id=$1',[first.accountID])).rows).toEqual([{status:'PENDING'}]);
       expect((await post('passkeys/registration/verify',payload,first.token)).statusCode).toBe(400);
       await post('session/logout',{},first.token);
       expect(await sessionAccount(first.token)).toBeNull();expect(await sessionAccount(next.token)).toBe(first.accountID);
@@ -101,6 +131,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
         const result=await db.query('SELECT id FROM wallet_credentials WHERE account_id=$1',[initial.accountID]);
         expect(result.rows).toEqual([]);
         const sessions=await db.query('SELECT token_hash FROM wallet_sessions WHERE account_id=$1',[initial.accountID]);expect(sessions.rows).toEqual([]);
+        expect((await db.query('SELECT account_id FROM wallet_deployment_jobs WHERE account_id=$1',[initial.accountID])).rows).toEqual([]);
       }
     } finally {await app.close();}
   });
@@ -274,5 +305,4 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   });
 
 });
-
 
