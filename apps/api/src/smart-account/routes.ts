@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { TESTNET_V080 } from './kit-v080-preflight.js';
 import { StrKey } from '@stellar/stellar-sdk';
-import { sessionAccount, db } from '../store.js';
+import { sessionAccount, db, getCredentials } from '../store.js';
 import { createTestnetRpc } from './deployment-evidence.js';
 import { TESTNET_PASSPHRASE } from '../config.js';
 import { testnetRelayer } from './relayer.js';
@@ -20,12 +20,22 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     const token = bearer?.startsWith('Bearer ') ? bearer.slice(7) : undefined;
     const accountID = await sessionAccount(token);
     if (!accountID) return reply.code(401).send({ error: 'AUTHENTICATION_REQUIRED' });
+    const credentials = await getCredentials(accountID);
+    if (credentials.length < 2) {
+      await db.query(`INSERT INTO wallet_deployment_jobs(account_id,status) VALUES($1,'AWAITING_PASSKEY')
+        ON CONFLICT (account_id) DO UPDATE SET status=CASE
+          WHEN wallet_deployment_jobs.status IN ('PENDING','AWAITING_PASSKEY') THEN 'AWAITING_PASSKEY'
+          ELSE wallet_deployment_jobs.status END,updated_at=NOW()`, [accountID]);
+      return reply.code(202).send({ status: 'AWAITING_PASSKEY', deploymentEnabled: false, nextAction: 'ENROLL_INDEPENDENT_BACKUP_PASSKEY' });
+    }
     const { rows } = await db.query<{ status: string; contract_address: string | null; transaction_hash: string | null }>(
       `INSERT INTO wallet_deployment_jobs(account_id) VALUES($1)
-       ON CONFLICT (account_id) DO UPDATE SET updated_at=wallet_deployment_jobs.updated_at
+       ON CONFLICT (account_id) DO UPDATE SET status=CASE
+         WHEN wallet_deployment_jobs.status='AWAITING_PASSKEY' THEN 'PENDING'
+         ELSE wallet_deployment_jobs.status END,updated_at=NOW()
        RETURNING status, contract_address, transaction_hash`, [accountID]);
     reply.code(202);
-    return { status: rows[0].status, address: rows[0].contract_address, transactionHash: rows[0].transaction_hash, deploymentEnabled: false, nextAction: 'PASSKEY_CONTROLLED_DEPLOYMENT_NOT_YET_CONFIGURED' };
+    return { status: rows[0].status, address: rows[0].contract_address, transactionHash: rows[0].transaction_hash, deploymentEnabled: false, nextAction: 'AWAITING_VERIFIED_TESTNET_DEPLOYMENT_WORKER' };
   });
 
   app.get('/api/v1/smart-account/deployment', async (request, reply) => {
