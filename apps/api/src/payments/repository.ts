@@ -1,8 +1,8 @@
 import { digest, NETWORK, requireThat, type Attempt, type Intent, type TransferEvent, type Wallet } from './model.js';
 export type BalanceSnapshot = { amountStroops: string; ledger: number; updatedAt: number };
-/** Sunil's MySQL implementation supplies this asynchronous boundary.
+/** The PostgreSQL implementation supplies this asynchronous boundary.
  * Every mutation must resolve only AFTER COMMIT. Atomic methods must use database locks,
- * not process-local mutexes. See docs/MYSQL_PAYMENT_CONTRACT.md for transaction invariants.
+ * not process-local mutexes. See docs/POSTGRESQL_PAYMENT_CONTRACT.md for transaction invariants.
  */
 export interface PaymentRepository {
   wallet(id: string, owner: string): Promise<Wallet>;
