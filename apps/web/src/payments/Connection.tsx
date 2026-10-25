@@ -119,7 +119,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       const response = await startAuthentication({ optionsJSON: challenge.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
       if (generation.current !== id) return;
       const session = await api('passkeys/authentication/verify', { accountID: owner, requestID: text(challenge.requestID), response });
-      if (await adoptSession(session, owner, id)) { setAccountId(owner); await loadWallets(id); await refreshDeployment(id); }
+      if (await adoptSession(session, owner, id)) { setAccountId(owner); await loadWallets(id); }
     } catch (e) { await fail(id, e); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
@@ -146,8 +146,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       if (await adoptSession(session, owner, id)) {
         if (additional) setNotice('Additional passkey enrolled for sign-in. This does not change your wallet’s on-chain signers or verify recovery.');
         await loadWallets(id);
-        await refreshDeployment(id);
-        if (!additional) setOfferDeployment(true);
+
       }
     } catch (e) {
       if (additional && !verifying && active(id)) setError(e instanceof Error ? e.message : 'Passkey enrollment cancelled. Try again when ready.');
