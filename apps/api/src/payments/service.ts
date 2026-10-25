@@ -1,3 +1,4 @@
+import { StrKey } from '@stellar/stellar-sdk';
 import type { PaymentRepository } from './repository.js';
 import { digest, PaymentError, requireThat, TERMINAL, validateIntent, type Attempt, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
 
@@ -15,6 +16,14 @@ export class PaymentService {
   }
   async create(owner: string, walletId: string, intent: Intent, key: string) {
     const wallet = await this.store.wallet(walletId, owner); validateIntent(intent, wallet);
+    if (StrKey.isValidContract(intent.destination)) {
+      // C->C is limited to another explicitly provisioned Testnet wallet.
+      // The recipient must have a current, independently recovered signer policy.
+      const recipient = (await this.store.allWallets()).find(w => w.address === intent.destination);
+      requireThat(recipient && recipient.id !== wallet.id && recipient.routes.includes('contract'), 'UNVERIFIED_CONTRACT_RECIPIENT', 400);
+      const receivingPolicy = await this.policies.current(recipient.address);
+      requireThat(receivingPolicy.recoveryReady && receivingPolicy.fingerprint === recipient.policy, 'RECIPIENT_RECOVERY_OR_POLICY_UNREADY');
+    }
     const prior = await this.store.byKey(walletId, key);
     if (prior) { requireThat(prior.requestDigest === digest(intent), 'IDEMPOTENCY_CONFLICT'); return prior; }
     await this.policy(wallet);

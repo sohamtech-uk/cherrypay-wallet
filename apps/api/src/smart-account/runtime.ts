@@ -29,7 +29,7 @@ export async function createPinnedPaymentRuntime(options: {
     const wallet = await repository.wallet(account.walletId, account.owner);
     const policy = await codec.current(account.address);
     requireThat(wallet.address === account.address && wallet.policy === policy.fingerprint && policy.recoveryReady, 'APPROVED_WALLET_BINDING_MISMATCH');
-    requireThat(wallet.routes.length === 1 && wallet.routes[0] === 'classic', 'INITIAL_RELEASE_REQUIRES_C_TO_G');
+    requireThat(JSON.stringify(wallet.routes) === JSON.stringify(['classic','contract']), 'C_TO_C_ROUTE_POLICY_NOT_ENABLED');
   }
   return {
     payments: new PaymentService(repository, chain, codec, options.startLedger),

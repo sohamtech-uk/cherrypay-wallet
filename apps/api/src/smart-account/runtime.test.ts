@@ -14,7 +14,7 @@ function fixture() {
     primaryRuleId: 1, backupRuleId: 2, primaryCredentialId: 'primary', backupCredentialId: 'backup',
     deploymentTransactionHash: 'b'.repeat(64), recoveryTransactionHash: 'c'.repeat(64),
   };
-  const stored = { ...wallet, routes: ['classic'] as ('classic'|'contract')[] };
+  const stored = { ...wallet, routes: ['classic','contract'] as ('classic'|'contract')[] };
   const repository = { wallet: vi.fn(async () => stored) } as unknown as PaymentRepository;
   const policy = vi.spyOn(PinnedAccountAdapter.prototype, 'current').mockResolvedValue({fingerprint: wallet.policy, recoveryReady: true});
   return { stored, policy, options: { accounts: [account], repository, relayerSecret: Keypair.random().secret(), startLedger: 100 } };
@@ -38,7 +38,7 @@ it('fails startup on signer changes, wrong saved address or unsupported destinat
   for (const mutate of [
     (f: ReturnType<typeof fixture>) => { f.stored.policy = 'old-policy'; },
     (f: ReturnType<typeof fixture>) => { f.stored.address = f.options.accounts[0].verifierAddress; },
-    (f: ReturnType<typeof fixture>) => { f.stored.routes = ['contract']; },
+    (f: ReturnType<typeof fixture>) => { f.stored.routes = ['classic']; },
   ]) {
     const f = fixture(); mutate(f);
     await expect(createPinnedPaymentRuntime(f.options)).rejects.toThrow();

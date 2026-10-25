@@ -136,3 +136,10 @@ and does not change prior migrations. Roll back application code without droppin
 existing identity/payment data; unused tickets expire. Keep deployment and spending
 disabled until evidence above passes. CI must pass both API/PostgreSQL and frontend
 checks before merging. All work remains Testnet-only.
+
+
+## User-to-user XLM C→C gate (2026-10-25)
+
+The native SAC transfer constructor and event decoder already accept contract addresses. This change extends explicitly provisioned wallet routes from `['classic']` to `['classic','contract']`, but only for verified pinned smart accounts with independent recovery. For C→C sends, the payment service requires the destination to be another registered wallet whose **current** on-chain signer policy agrees with its stored policy and has an independent backup. Unknown C-address contracts are not accepted; no unrestricted contract invocation is exposed. The same verified RPC event/indexing flow supplies balances and history for C destinations. Provisioning existing `['classic']` rows will fail closed rather than silently upgrade their policy; operator review is required before updating route records.
+
+**Recovery remains gated:** existing PinnedAccountAdapter checks two separately owned on-chain signer rules and a separate backup public key. Physical on-chain backup enrollment and a second-device lost-primary recovery drill still require owner participation, deployed Testnet accounts, and confirmed transaction hashes; code cannot silently create or attest those actions.

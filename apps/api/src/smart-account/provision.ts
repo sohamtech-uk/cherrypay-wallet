@@ -31,9 +31,9 @@ export async function provisionAccounts(input: PaymentManifest, apply = false, o
       const { rows } = await client.query('SELECT * FROM wallet_onchain_accounts WHERE id=$1 OR address=$2 FOR UPDATE', [account.walletId, account.address]);
       const current = rows[0];
       if (current) {
-        requireThat(rows.length === 1 && current.id === account.walletId && current.owner === account.owner && current.address === account.address && current.network === 'TESTNET' && current.policy === policy.fingerprint && JSON.stringify(current.routes) === '["classic"]', 'EXISTING_WALLET_BINDING_CONFLICT');
+        requireThat(rows.length === 1 && current.id === account.walletId && current.owner === account.owner && current.address === account.address && current.network === 'TESTNET' && current.policy === policy.fingerprint && JSON.stringify(current.routes) === '["classic","contract"]', 'EXISTING_WALLET_BINDING_CONFLICT');
       } else if (apply) {
-        await client.query("INSERT INTO wallet_onchain_accounts(id,owner,network,address,policy,routes,created_at) VALUES($1,$2,'TESTNET',$3,$4,'[\"classic\"]'::jsonb,$5)", [account.walletId, account.owner, account.address, policy.fingerprint, Date.now()]);
+        await client.query("INSERT INTO wallet_onchain_accounts(id,owner,network,address,policy,routes,created_at) VALUES($1,$2,'TESTNET',$3,$4,'[\"classic\",\"contract\"]'::jsonb,$5)", [account.walletId, account.owner, account.address, policy.fingerprint, Date.now()]);
       }
       plan.push({walletId:account.walletId,address:account.address,policy:policy.fingerprint,action:current?'unchanged':'create'});
     }
