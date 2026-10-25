@@ -13,21 +13,22 @@ export async function sendVerificationEmail(email: string, code: string, config:
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(config.timeoutMs),
   });
   if (!tokenResponse.ok) throw Error('AZURE_MAIL_TOKEN_FAILED');
   const tokenData: unknown = await tokenResponse.json();
   if (!tokenData || typeof tokenData !== 'object' || !('access_token' in tokenData) || typeof tokenData.access_token !== 'string') throw Error('AZURE_MAIL_TOKEN_INVALID');
-  const response = await fetch('https://graph.microsoft.com/v1.0/users/' + encodeURIComponent(config.sender) + '/sendMail', {
+  const response = await fetch(config.graphBaseUrl + '/users/' + encodeURIComponent(config.sender) + '/sendMail', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + tokenData.access_token, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message: {
         subject: 'Verify your Cherry Wallet email',
+        from: { emailAddress: { address: config.sender, name: config.senderName } },
         body: { contentType: 'Text', content: 'Your Cherry Wallet verification code is ' + code + '. It expires in 15 minutes. Never share this code.' },
         toRecipients: [{ emailAddress: { address: email } }],
       },
-      saveToSentItems: false,
+      saveToSentItems: config.saveToSentItems,
     }),
     signal: AbortSignal.timeout(10000),
   });
