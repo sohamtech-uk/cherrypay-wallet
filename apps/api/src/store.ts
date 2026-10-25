@@ -1,91 +1,68 @@
-import { randomBytes, randomUUID, createHash } from 'node:crypto';
-import pg from 'pg';
-const pool = new pg.Pool({connectionString:process.env.DATABASE_URL ?? 'postgres://wallet:wallet_local_only@127.0.0.1:5432/wallet',max:10});
-export const db = pool;
-export const hashToken = (value:string) => createHash('sha256').update(value).digest('hex');
-export const freshToken = () => randomBytes(32).toString('base64url');
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
+import mysql,{type PoolConnection,type RowDataPacket,type ResultSetHeader} from 'mysql2/promise';
+const pool=mysql.createPool({host:process.env.DB_HOST??'127.0.0.1',port:Number(process.env.DB_PORT??3306),user:process.env.DB_USER??'wallet',password:process.env.DB_PASSWORD??'wallet_local_only',database:process.env.DB_NAME??'wallet',waitForConnections:true,connectionLimit:10,timezone:'Z'});
+export const db=pool;
+export const hashToken=(v:string)=>createHash('sha256').update(v).digest('hex');
+export const freshToken=()=>randomBytes(32).toString('base64url');
+type Cred={id:string;public_key:string;counter:number|string;transports:string[]};
+const normalize=(rows:RowDataPacket[])=>rows.map(r=>({...r,transports:typeof r.transports==='string'?JSON.parse(r.transports):r.transports})) as Cred[];
 export async function initializeStore(){
- await pool.query(`CREATE TABLE IF NOT EXISTS wallet_accounts (
- id uuid PRIMARY KEY, webauthn_user_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
- ); CREATE TABLE IF NOT EXISTS wallet_credentials (
- id text PRIMARY KEY, account_id uuid NOT NULL REFERENCES wallet_accounts(id),
- public_key text NOT NULL, counter bigint NOT NULL DEFAULT 0, transports jsonb NOT NULL DEFAULT '[]'::jsonb,
- created_at timestamptz NOT NULL DEFAULT now()
- ); CREATE TABLE IF NOT EXISTS wallet_challenges (
- id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES wallet_accounts(id),
- purpose text NOT NULL CHECK (purpose IN ('register_initial','register_backup','authenticate')),
- challenge text NOT NULL, session_hash text, expires_at timestamptz NOT NULL
- ); CREATE TABLE IF NOT EXISTS wallet_sessions (
- token_hash text PRIMARY KEY, account_id uuid NOT NULL REFERENCES wallet_accounts(id),
- expires_at timestamptz NOT NULL
- );`);
+ const statements=[
+ 'CREATE TABLE IF NOT EXISTS wallet_accounts(id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,webauthn_user_id VARCHAR(128) NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB',
+ 'CREATE TABLE IF NOT EXISTS wallet_credentials(id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,public_key TEXT NOT NULL,counter BIGINT UNSIGNED NOT NULL DEFAULT 0,transports JSON NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(account_id)) ENGINE=InnoDB',
+ "CREATE TABLE IF NOT EXISTS wallet_challenges(id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,purpose ENUM('register_initial','register_backup','authenticate') NOT NULL,challenge VARCHAR(512) NOT NULL,session_hash CHAR(64) NULL,expires_at DATETIME(3) NOT NULL,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(expires_at)) ENGINE=InnoDB",
+ 'CREATE TABLE IF NOT EXISTS wallet_sessions(token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,expires_at DATETIME(3) NOT NULL,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(expires_at)) ENGINE=InnoDB'
+ ];
+ for(const statement of statements)await pool.query(statement);
 }
 export async function createAccount(){
  const id=randomUUID(),userID=randomBytes(32).toString('base64url');
- await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES ($1,$2)',[id,userID]);
- return {id,userID};
+ await pool.execute('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES (?,?)',[id,userID]);return {id,userID};
 }
 export async function sessionAccount(token:string|undefined){
- if(!token || !/^[a-zA-Z0-9_-]{40,100}$/.test(token)) return null;
- const {rows}=await pool.query('SELECT account_id FROM wallet_sessions WHERE token_hash=$1 AND expires_at>now()',[hashToken(token)]);
- return rows[0]?.account_id as string|undefined ?? null;
+ if(!token||!/^[a-zA-Z0-9_-]{40,100}$/.test(token))return null;
+ const [rows]=await pool.execute<RowDataPacket[]>('SELECT account_id FROM wallet_sessions WHERE token_hash=? AND expires_at>UTC_TIMESTAMP(3)',[hashToken(token)]);
+ return (rows[0]?.account_id as string|undefined)??null;
 }
 export async function createSession(accountID:string){
  const token=freshToken();
- await pool.query("INSERT INTO wallet_sessions(token_hash,account_id,expires_at) VALUES ($1,$2,now()+interval '30 minutes')",[hashToken(token),accountID]);
+ await pool.execute('INSERT INTO wallet_sessions(token_hash,account_id,expires_at) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 30 MINUTE))',[hashToken(token),accountID]);
  return {token,expiresInSeconds:1800};
 }
-export async function revokeSession(token:string){await pool.query('DELETE FROM wallet_sessions WHERE token_hash=$1',[hashToken(token)]);}
+export async function revokeSession(token:string){await pool.execute('DELETE FROM wallet_sessions WHERE token_hash=?',[hashToken(token)]);}
 export async function getAccount(id:string){
- const {rows}=await pool.query('SELECT id,webauthn_user_id FROM wallet_accounts WHERE id=$1',[id]);return rows[0] as {id:string;webauthn_user_id:string}|undefined;
+ const [rows]=await pool.execute<RowDataPacket[]>('SELECT id,webauthn_user_id FROM wallet_accounts WHERE id=?',[id]);
+ return rows[0] as {id:string;webauthn_user_id:string}|undefined;
 }
 export async function getCredentials(id:string){
- const {rows}=await pool.query('SELECT id,public_key,counter,transports FROM wallet_credentials WHERE account_id=$1 ORDER BY created_at',[id]);
- return rows as Array<{id:string;public_key:string;counter:string;transports:string[]}>;
+ const [rows]=await pool.execute<RowDataPacket[]>('SELECT id,public_key,counter,transports FROM wallet_credentials WHERE account_id=? ORDER BY created_at',[id]);return normalize(rows);
 }
 export async function newChallenge(accountID:string,purpose:string,challenge:string,sessionToken?:string){
- const requestID=randomUUID();
- await pool.query("INSERT INTO wallet_challenges(id,account_id,purpose,challenge,session_hash,expires_at) VALUES ($1,$2,$3,$4,$5,now()+interval '2 minutes')",[requestID,accountID,purpose,challenge,sessionToken?hashToken(sessionToken):null]);
- return requestID;
+ const id=randomUUID();
+ await pool.execute('INSERT INTO wallet_challenges(id,account_id,purpose,challenge,session_hash,expires_at) VALUES (?,?,?,?,?,DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 2 MINUTE))',[id,accountID,purpose,challenge,sessionToken?hashToken(sessionToken):null]);return id;
 }
-export async function consumeChallenge(id:string,accountID:string,purpose:string,sessionToken?:string){
- // DELETE RETURNING guarantees only one concurrent verifier can consume a challenge.
- const {rows}=await pool.query('DELETE FROM wallet_challenges WHERE id=$1 AND account_id=$2 AND purpose=$3 AND expires_at>now() AND session_hash IS NOT DISTINCT FROM $4 RETURNING challenge',[id,accountID,purpose,sessionToken?hashToken(sessionToken):null]);
- if(!rows[0]) throw new Error('Challenge expired, consumed or unauthorized');
- return rows[0].challenge as string;
-}
-export async function addCredential(accountID:string,c:{id:string;publicKey:Uint8Array;counter:number;transports?:string[]}){
- await pool.query('INSERT INTO wallet_credentials(id,account_id,public_key,counter,transports) VALUES($1,$2,$3,$4,$5)',[c.id,accountID,Buffer.from(c.publicKey).toString('base64'),c.counter,JSON.stringify(c.transports??[])]);
-}
-export async function updateCounter(id:string,accountID:string,oldCounter:number,newCounter:number){
- const {rowCount}=await pool.query('UPDATE wallet_credentials SET counter=$1 WHERE id=$2 AND account_id=$3 AND counter=$4',[newCounter,id,accountID,oldCounter]);
- if(rowCount!==1)throw new Error('Credential counter changed concurrently');
-}
-
-export async function withLockedAccount<T>(accountID:string, work:(client:pg.PoolClient)=>Promise<T>):Promise<T>{
- const client=await pool.connect();
+export async function withLockedAccount<T>(accountID:string,work:(client:PoolConnection)=>Promise<T>):Promise<T>{
+ const client=await pool.getConnection();
  try{
-  await client.query('BEGIN');
-  const lock=await client.query('SELECT id FROM wallet_accounts WHERE id=$1 FOR UPDATE',[accountID]);
-  if(!lock.rowCount)throw Error('Account not found');
-  const result=await work(client);
-  await client.query('COMMIT');
-  return result;
- }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  await client.beginTransaction();
+  const [rows]=await client.execute<RowDataPacket[]>('SELECT id FROM wallet_accounts WHERE id=? FOR UPDATE',[accountID]);
+  if(!rows.length)throw Error('Account not found');
+  const result=await work(client);await client.commit();return result;
+ }catch(error){await client.rollback();throw error;}finally{client.release();}
 }
-export async function consumeLockedChallenge(client:pg.PoolClient,id:string,accountID:string,purpose:string,sessionToken?:string){
- const result=await client.query('DELETE FROM wallet_challenges WHERE id=$1 AND account_id=$2 AND purpose=$3 AND expires_at>now() AND session_hash IS NOT DISTINCT FROM $4 RETURNING challenge',[id,accountID,purpose,sessionToken?hashToken(sessionToken):null]);
- if(!result.rowCount)throw Error('Challenge expired, consumed or unauthorized');
- return result.rows[0].challenge as string;
+export async function consumeLockedChallenge(client:PoolConnection,id:string,accountID:string,purpose:string,sessionToken?:string){
+ const [rows]=await client.execute<RowDataPacket[]>('SELECT challenge FROM wallet_challenges WHERE id=? AND account_id=? AND purpose=? AND expires_at>UTC_TIMESTAMP(3) AND session_hash <=> ? FOR UPDATE',[id,accountID,purpose,sessionToken?hashToken(sessionToken):null]);
+ if(rows.length!==1)throw Error('Challenge expired, consumed or unauthorized');
+ const [deleted]=await client.execute<ResultSetHeader>('DELETE FROM wallet_challenges WHERE id=?',[id]);
+ if(deleted.affectedRows!==1)throw Error('Challenge already consumed');return rows[0].challenge as string;
 }
-export async function credentialsLocked(client:pg.PoolClient,accountID:string){
- const result=await client.query('SELECT id,public_key,counter,transports FROM wallet_credentials WHERE account_id=$1 ORDER BY created_at',[accountID]);
- return result.rows as Awaited<ReturnType<typeof getCredentials>>;
+export async function credentialsLocked(client:PoolConnection,accountID:string){
+ const [rows]=await client.execute<RowDataPacket[]>('SELECT id,public_key,counter,transports FROM wallet_credentials WHERE account_id=? ORDER BY created_at',[accountID]);return normalize(rows);
 }
-export async function addCredentialLocked(client:pg.PoolClient,accountID:string,c:{id:string;publicKey:Uint8Array;counter:number;transports?:string[]}){
- await client.query('INSERT INTO wallet_credentials(id,account_id,public_key,counter,transports) VALUES($1,$2,$3,$4,$5)',[c.id,accountID,Buffer.from(c.publicKey).toString('base64'),c.counter,JSON.stringify(c.transports??[])]);
+export async function addCredentialLocked(client:PoolConnection,accountID:string,c:{id:string;publicKey:Uint8Array;counter:number;transports?:string[]}){
+ await client.execute('INSERT INTO wallet_credentials(id,account_id,public_key,counter,transports) VALUES (?,?,?,?,?)',[c.id,accountID,Buffer.from(c.publicKey).toString('base64'),c.counter,JSON.stringify(c.transports??[])]);
 }
-export async function updateCounterLocked(client:pg.PoolClient,id:string,accountID:string,oldCounter:number,newCounter:number){
- const result=await client.query('UPDATE wallet_credentials SET counter=$1 WHERE id=$2 AND account_id=$3 AND counter=$4',[newCounter,id,accountID,oldCounter]);
- if(result.rowCount!==1)throw Error('Concurrent authentication detected');
+export async function updateCounterLocked(client:PoolConnection,id:string,accountID:string,oldCounter:number,newCounter:number){
+ const [result]=await client.execute<ResultSetHeader>('UPDATE wallet_credentials SET counter=? WHERE id=? AND account_id=? AND counter=?',[newCounter,id,accountID,oldCounter]);
+ if(result.affectedRows!==1)throw Error('Concurrent authentication detected');
 }
