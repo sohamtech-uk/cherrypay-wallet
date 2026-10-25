@@ -4,9 +4,12 @@
 - Testnet exclusively: passphrase `Test SDF Network ; September 2015`, RPC `https://soroban-testnet.stellar.org`.
 - No Mainnet configuration, keys or deployed contracts in this branch.
 
+## Preferred integration candidate
+**Stellar Smart Account Kit** (https://github.com/stellar/smart-account-kit) is the preferred integration candidate for Cherry Pay Wallet. This is an architectural selection, **not** an approved or deployed contract. Before using it for spending, pin and review the exact source commit, package version, contract WASM hash, WebAuthn P-256 authorization format, recovery policy, licensing and audit status. Keep deployment and payments disabled until these gates pass.
+
 ## Candidate components
 - Stellar smart-account patterns: https://developers.stellar.org/docs/build/guides/contract-accounts/smart-wallets
-- Stellar Smart Account Kit: https://github.com/stellar/smart-account-kit (check audit/security status and pin reviewed version)
+- **Preferred:** Stellar Smart Account Kit: https://github.com/stellar/smart-account-kit (version and contract verification pending)
 - OpenZeppelin Stellar account contracts: https://docs.openzeppelin.com/stellar-contracts/accounts/smart-account
 - Native XLM through Stellar Asset Contract (SAC): https://developers.stellar.org/docs/tokens/stellar-asset-contract
 

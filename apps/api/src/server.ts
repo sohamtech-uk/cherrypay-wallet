@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { initializeStore, db } from './store.js';
 
-// No default policy reader: database credentials do not prove on-chain ownership.
+// Do not enable payments until on-chain smart-account authorization is verified.
 const app = await buildApp();
 async function shutdown() {
   try { await app.close(); } finally { await db.end(); }
