@@ -1,16 +1,17 @@
 import { createHash } from 'node:crypto';
 import { Address, StrKey, xdr, type rpc } from '@stellar/stellar-sdk';
 import { Client, type ContextRule } from 'smart-account-kit-bindings';
-import { attestAccountCode } from './onchain-code.js';
+import { verifyCurrentContractCode } from './receive-route.js';
+import { SMART_ACCOUNT_KIT, requireApprovedAccountWasm } from './kit-manifest.js';
 import { createTestnetRpc } from './deployment-evidence.js';
-import { readHydratedContextRule, signerScVal, simulationReader, type RuleSpec } from './context-rules.js';
+import { readHydratedContextRule, signerScVal, simulationReader, withConsistentSnapshot, type RuleSpec } from './context-rules.js';
 import type { ContractRuleReader, VerifiedSignerRules } from './passkey-codec.js';
 import type { PolicyReader } from '../payments/model.js';
 import { credentialKeyData } from './pinned-adapter.js';
 import { getCredentials } from '../store.js';
 import { TESTNET_PASSPHRASE, TESTNET_RPC_URL } from '../config.js';
 
-export type RuleReaderRpc = Pick<rpc.Server, 'getNetwork' | 'getContractData' | 'getLatestLedger' | 'simulateTransaction'>;
+export type RuleReaderRpc = Pick<rpc.Server, 'getNetwork' | 'getLedgerEntries' | 'simulateTransaction'>;
 export type RuleSelection = Readonly<{
   /** Rules committed into the transfer digest, one per auth context, in invocation order. */
   transferRuleIds: readonly number[];
@@ -18,6 +19,8 @@ export type RuleSelection = Readonly<{
   recoveryRuleId?: number;
   /** WebAuthn verifier contract that every accepted External signer must use. */
   verifier: string;
+  /** Reviewed verifier WASM hash; defaults to the manifest's pinned verifier. */
+  verifierWasmHash?: string;
 }>;
 export type VerifiedAccountRules = VerifiedSignerRules & Readonly<{
   recoveryReady: boolean;
@@ -58,18 +61,30 @@ export class TestnetContractRuleReader implements ContractRuleReader {
     this.selection = Object.freeze({ ...selection, transferRuleIds: Object.freeze([...selection.transferRuleIds]) });
   }
 
-  /** Snapshot of code + selected rules + optional recovery rule, independent of any auth entry. */
-  async readAccountRules(address: string): Promise<VerifiedAccountRules & { rules: readonly ContextRule[] }> {
-    const code = await attestAccountCode(address, this.server);
-    const latest = await this.server.getLatestLedger();
+  /** One consistent ledger snapshot of account code, verifier code, selected rules and any
+   * hydrated IDs. A snapshot that spans ledgers is discarded and the whole read retried. */
+  readAccountRules(address: string): Promise<VerifiedAccountRules & { rules: readonly ContextRule[] }> {
+    return withConsistentSnapshot(() => this.readSnapshot(address));
+  }
+
+  private async readSnapshot(address: string): Promise<VerifiedAccountRules & { rules: readonly ContextRule[] }> {
+    const { transferRuleIds, recoveryRuleId, verifier } = this.selection;
+    const accountWasmHash = SMART_ACCOUNT_KIT.accountWasmHash;
+    requireApprovedAccountWasm(accountWasmHash);
+    const [accountCode, verifierCode] = await Promise.all([
+      verifyCurrentContractCode(this.server, address, accountWasmHash),
+      verifyCurrentContractCode(this.server, verifier, this.selection.verifierWasmHash ?? SMART_ACCOUNT_KIT.webauthnVerifierWasmHash),
+    ]);
+    const code = { wasmSha256: accountCode.wasmHash };
     const spec = new Client({ contractId: address, networkPassphrase: TESTNET_PASSPHRASE, rpcUrl: TESTNET_RPC_URL }).spec as unknown as RuleSpec;
     const read = simulationReader(this.server, address);
-    const { transferRuleIds, recoveryRuleId, verifier } = this.selection;
     const allIds = recoveryRuleId === undefined ? transferRuleIds : [...transferRuleIds, recoveryRuleId];
     const hydrated = [];
     for (const id of allIds) hydrated.push(await readHydratedContextRule(read, spec, id));
-    const ledgers = hydrated.flatMap(h => h.ledgers);
-    if (ledgers.some(l => l < latest.sequence)) throw new Error('STALE_POLICY_READ');
+    // Code, rules and hydrated IDs must all be observed at the same ledger.
+    const snapshot = accountCode.ledger;
+    if (![verifierCode.ledger, ...hydrated.flatMap(h => h.ledgers)].every(l => l === snapshot)) throw new Error('INCONSISTENT_POLICY_SNAPSHOT');
+    const latest = { sequence: snapshot };
     const rules = hydrated.map(h => h.rule);
     for (const rule of rules) {
       if (rule.valid_until != null && rule.valid_until < latest.sequence) throw new Error('CONTEXT_RULE_EXPIRED');
@@ -96,7 +111,7 @@ export class TestnetContractRuleReader implements ContractRuleReader {
       address, wasmSha256: code.wasmSha256, recoveryRuleId: recoveryRuleId ?? null,
       rules: rules.map(r => ({ id: r.id, type: r.context_type, validUntil: r.valid_until ?? null, signerIds: r.signer_ids, policyIds: r.policy_ids, signers: r.signers.map(s => s.tag === 'External' ? [s.tag, s.values[0], Buffer.from(s.values[1]).toString('hex')] : [s.tag, s.values[0]]) })),
     })).digest('hex');
-    return { address, wasmSha256: code.wasmSha256, ledger: Math.max(latest.sequence, ...ledgers), contextRuleIds: [...transferRuleIds], credentialIds, signerXdrByCredential, fingerprint, recoveryReady, keyDataByCredential, rules: transferRules };
+    return { address, wasmSha256: code.wasmSha256, ledger: snapshot, contextRuleIds: [...transferRuleIds], credentialIds, signerXdrByCredential, fingerprint, recoveryReady, keyDataByCredential, rules: transferRules };
   }
 
   async readVerifiedRules(address: string, authEntry: xdr.SorobanAuthorizationEntry): Promise<VerifiedSignerRules> {

@@ -3,6 +3,8 @@ import { Address, StrKey, xdr } from '@stellar/stellar-sdk';
 import { Client } from 'smart-account-kit-bindings';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+const code = vi.hoisted(() => ({ ledger: 500 }));
+vi.mock('./receive-route.js', () => ({ verifyCurrentContractCode: vi.fn(async (_server: unknown, _address: string, wasmHash: string) => ({ ledger: code.ledger, wasmHash })) }));
 import { decodeContextRule, readHydratedContextRule, signerScVal, type RawContractRead, type RuleSpec } from './context-rules.js';
 import { ContractRulePolicyReader, TestnetContractRuleReader, type RuleReaderRpc } from './contract-rule-reader.js';
 import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
@@ -111,22 +113,22 @@ describe('TestnetContractRuleReader + ContractRulePolicyReader', () => {
   const primary = keyData('primary-cred'), backup = keyData('backup-cred');
   let rules: Record<number, xdr.ScVal>, registry: Record<string, number>;
   beforeEach(() => {
+    code.ledger = 500;
     rules = { 0: ruleScVal({ id: 0, key: primary }), 1: ruleScVal({ id: 1, key: backup }) };
     registry = { [signerKey(primary)]: 10, [signerKey(backup)]: 11 };
     ownedIds = ['primary-cred', 'backup-cred'].map(c => Buffer.from(c).toString('base64url'));
   });
-  function server(ledger = 500): RuleReaderRpc {
-    const wasm = Buffer.from(SMART_ACCOUNT_KIT.accountWasmHash, 'hex');
+  /** simLedgers: ledger reported by each successive simulation (last value repeats). */
+  function server(ledger = 500, simLedgers: number[] = []): RuleReaderRpc {
+    let call = 0;
     return {
-      getNetwork: vi.fn(async () => ({ passphrase: TESTNET_PASSPHRASE, protocolVersion: 23 })),
-      getLatestLedger: vi.fn(async () => ({ id: 'x', sequence: ledger, protocolVersion: 23 })),
-      getContractData: vi.fn(async () => ({ val: xdr.LedgerEntryData.contractData(new xdr.ContractDataEntry({ ext: new xdr.ExtensionPoint(0), contract: new Address(account).toScAddress(), key: xdr.ScVal.scvLedgerKeyContractInstance(), durability: xdr.ContractDataDurability.persistent(), val: xdr.ScVal.scvContractInstance(new xdr.ScContractInstance({ executable: xdr.ContractExecutable.contractExecutableWasm(wasm), storage: [] })) })) })),
       simulateTransaction: vi.fn(async (tx: { operations: { func: xdr.HostFunction }[] }) => {
-        const call = tx.operations[0].func.invokeContract();
-        const fn = call.functionName().toString(), arg = call.args()[0];
+        const latestLedger = simLedgers.length ? simLedgers[Math.min(call++, simLedgers.length - 1)] : ledger;
+        const invoke = tx.operations[0].func.invokeContract();
+        const fn = invoke.functionName().toString(), arg = invoke.args()[0];
         const retval = fn === 'get_context_rule' ? rules[arg.u32()] : fn === 'get_signer_id' ? xdr.ScVal.scvU32(registry[arg.toXDR('base64')]) : undefined;
-        if (!retval) return { error: 'HostError', latestLedger: ledger, events: [], _parsed: true };
-        return { latestLedger: ledger, minResourceFee: '1', events: [], transactionData: {} as never, result: { auth: [], retval }, _parsed: true };
+        if (!retval) return { error: 'HostError', latestLedger, events: [], _parsed: true };
+        return { latestLedger, minResourceFee: '1', events: [], transactionData: {} as never, result: { auth: [], retval }, _parsed: true };
       }),
     } as unknown as RuleReaderRpc;
   }
@@ -167,6 +169,17 @@ describe('TestnetContractRuleReader + ContractRulePolicyReader', () => {
     stored.set(realPrimary.id, realPrimary);
     await expect(new ContractRulePolicyReader(reader, new Map(), credentials).current(account)).rejects.toThrow('UNAPPROVED_ACCOUNT');
     await expect(policyReader(reader).current(account)).resolves.toMatchObject({ recoveryReady: true });
+  });
+  it('retries a read whose code, rule and hydrated-ID observations span ledgers', async () => {
+    // First attempt: rule at 500, hydrated signer ID at 501 -> discarded; second attempt consistent.
+    const rpc = server(500, [500, 501, 500]);
+    const r = await new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, rpc).readAccountRules(account);
+    expect(r.ledger).toBe(500);
+    expect(rpc.simulateTransaction).toHaveBeenCalledTimes(4);
+  });
+  it('fails closed when no consistent snapshot can be observed', async () => {
+    code.ledger = 499;
+    await expect(new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, server(500)).readAccountRules(account)).rejects.toThrow('INCONSISTENT_POLICY_SNAPSHOT');
   });
   it('rejects wrong verifier, expired rules and invalid selections', async () => {
     const other = StrKey.encodeContract(Buffer.alloc(32, 7));

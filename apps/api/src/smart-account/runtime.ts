@@ -46,7 +46,7 @@ export type RuleReaderAccount = Readonly<{ walletId: string; owner: string; addr
  * Payments, approvals and receive routes share ONE TestnetContractRuleReader, so the
  * fingerprint saved at prepare time is the one StellarPasskeyCodec re-reads at approval.
  * Rule IDs and verifier come from reviewed deployment evidence, never HTTP input.
- * server.ts composes it from the environment via ruleReaderRuntimeFromEnv().
+ * Not activated by startServer(): configuredPayments() composes the manifest-pinned runtime.
  */
 export async function createRuleReaderPaymentRuntime(options: {
   accounts: readonly RuleReaderAccount[];
@@ -78,34 +78,4 @@ export async function createRuleReaderPaymentRuntime(options: {
     policyReader,
     receiveRoute: verifiedReceiveRoutes(repository, policyReader, server, new Map(options.accounts.map(account => [account.address, deployment]))),
   };
-}
-
-const U32 = /^(0|[1-9]\d{0,9})$/;
-function ruleId(value: string, name: string): number {
-  requireThat(U32.test(value.trim()) && Number(value) <= 0xffffffff, `INVALID_${name}`);
-  return Number(value);
-}
-/** Testnet payment configuration from the server environment (never from HTTP).
- * Returns undefined when PAYMENT_RELAYER_SECRET is unset: payment endpoints stay 503.
- * Approved accounts are the wallets registered with scripts/register-testnet-wallet.ts. */
-export function ruleReaderSettingsFromEnv(env: NodeJS.ProcessEnv) {
-  if (!env.PAYMENT_RELAYER_SECRET) return undefined;
-  requireThat(env.PAYMENT_START_LEDGER !== undefined && U32.test(env.PAYMENT_START_LEDGER), 'INVALID_PAYMENT_START_LEDGER');
-  requireThat(!!env.SMART_ACCOUNT_TRANSFER_RULE_IDS, 'SMART_ACCOUNT_TRANSFER_RULE_IDS_REQUIRED');
-  return {
-    relayerSecret: env.PAYMENT_RELAYER_SECRET,
-    startLedger: Number(env.PAYMENT_START_LEDGER),
-    selection: {
-      transferRuleIds: env.SMART_ACCOUNT_TRANSFER_RULE_IDS!.split(',').map(v => ruleId(v, 'TRANSFER_RULE_ID')),
-      recoveryRuleId: env.SMART_ACCOUNT_RECOVERY_RULE_ID ? ruleId(env.SMART_ACCOUNT_RECOVERY_RULE_ID, 'RECOVERY_RULE_ID') : undefined,
-      verifier: SMART_ACCOUNT_KIT.webauthnVerifierAddress,
-    } satisfies RuleSelection,
-  };
-}
-export async function ruleReaderRuntimeFromEnv(env: NodeJS.ProcessEnv, repository: PaymentRepository = new PostgresPaymentRepository()) {
-  const settings = ruleReaderSettingsFromEnv(env);
-  if (!settings) return undefined;
-  const wallets = await repository.allWallets();
-  requireThat(wallets.length > 0, 'NO_REGISTERED_TESTNET_WALLETS');
-  return createRuleReaderPaymentRuntime({ ...settings, repository, accounts: wallets.map(w => ({ walletId: w.id, owner: w.owner, address: w.address })) });
 }

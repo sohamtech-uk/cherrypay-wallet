@@ -1,22 +1,18 @@
-import { buildApp } from './app.js';
-import { initializeStore, db } from './store.js';
-import { ruleReaderRuntimeFromEnv } from './smart-account/runtime.js';
+import { startServer } from './startup.js';
+import { startupErrorCode } from './startup-error.js';
 
-// Payments are enabled only when PAYMENT_RELAYER_SECRET is set and every registered
-// Testnet wallet passes on-chain code, signer-rule, ownership and recovery checks.
-let app: Awaited<ReturnType<typeof buildApp>> | undefined;
-async function shutdown() {
-  try { await app?.close(); } finally { await db.end(); }
+const controller = new AbortController();
+const running = startServer(process.env,undefined,controller.signal);
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    controller.abort();
+    void running.then(server => server.shutdown()).catch(() => { process.exitCode = 1; });
+  });
 }
-try {
-  await initializeStore();
-  const runtime = await ruleReaderRuntimeFromEnv(process.env);
-  app = await buildApp(runtime ? { payments: runtime.payments, passkeyCodec: runtime.passkeyCodec, receiveRoute: runtime.receiveRoute } : {});
-  app.log.info({ paymentsEnabled: !!runtime }, 'Payment runtime');
-  await app.listen({ host: process.env.HOST ?? '127.0.0.1', port: Number(process.env.PORT ?? 3001) });
-} catch (error) {
-  if (app) app.log.error(error); else console.error(error instanceof Error ? error.message : error);
-  await shutdown();
+try { await running; }
+catch (error) {
+  // SDK/filesystem/database exceptions may embed secrets. Emit only a diagnostic code.
+  console.error(startupErrorCode(error,'WALLET_STARTUP_FAILED'));
   process.exitCode = 1;
 }
 
