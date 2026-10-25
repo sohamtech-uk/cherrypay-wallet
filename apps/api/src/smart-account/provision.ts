@@ -21,7 +21,7 @@ export async function provisionAccounts(input: PaymentManifest, apply = false, o
   const manifest = parsePaymentManifest(input);
   const pool = options.pool ?? db;
   const owners = [...new Set(manifest.accounts.map(a => a.owner))].sort();
-  const knownOwners = await pool.query('SELECT id FROM wallet_accounts WHERE id = ANY($1::uuid[])', [owners]);
+  const knownOwners = await pool.query('SELECT id FROM wallet_accounts WHERE id = ANY($1::text[])', [owners]);
   requireThat(knownOwners.rows.length === owners.length, 'MANIFEST_OWNER_NOT_ENROLLED');
   const policies = options.policies ?? new PinnedAccountAdapter(new rpc.Server(TESTNET_RPC_URL, { timeout: 20 }), manifest.accounts, async owner => {
     const { rows } = await pool.query<{ id: string; public_key: string }>('SELECT id,public_key FROM wallet_credentials WHERE account_id=$1', [owner]);
