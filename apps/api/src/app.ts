@@ -1,3 +1,4 @@
+import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import type { PaymentService } from './payments/service.js';
 import { startPaymentWorker } from './payments/worker.js';
 import { registerPaymentRoutes } from './payments/routes.js';
@@ -20,6 +21,7 @@ app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{return
 app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
 app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,recoveryReady:credentials.length>=2,walletDeploymentEnabled:false};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
+await registerSmartAccountRoutes(app);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 await registerPaymentRoutes(app, options.payments ? {
   service: options.payments,
