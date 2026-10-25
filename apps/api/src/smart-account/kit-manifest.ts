@@ -13,12 +13,12 @@ export const SMART_ACCOUNT_KIT = Object.freeze({
   networkPassphrase: 'Test SDF Network ; September 2015',
   rpcUrl: 'https://soroban-testnet.stellar.org',
   // No approved account WASM until patched artifact and live ledger proof are reviewed.
-  accountWasmHash: null,
+  accountWasmHash: '203e2970d9fed24fb5fca2e0aeebb3c1e4648b76dd6601567178e6474c9fec6f',
   webauthnVerifierAddress: 'CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F',
   webauthnVerifierWasmHash: 'e63a030d0f1a1481e36059a4837c433083b33e704c1f9625b7314795b6d72b76',
   sourceCommit: '1e513890ecf79833c9d6e7ef38a9358001c0b111',
   deploymentManifest: 'https://github.com/stellar/smart-account-kit/blob/main/docs/deployments-protocol-27-2026-07-09.md',
-  securityStatus: 'BLOCKED_LEGACY_ACCOUNT_WASM',
+  securityStatus: 'PATCHED_CANDIDATE_NOT_INDEPENDENTLY_ATTESTED',
   deploymentEnabled: false,
   spendingEnabled: false,
 } as const);
@@ -35,7 +35,7 @@ export const KNOWN_UNSAFE_ACCOUNT_WASM = '1b5f4534a76322da2ad7c745f6900857a6802b
 export function rejectLegacyAccountWasm(wasmHash: string): void {
   if (wasmHash.toLowerCase() === KNOWN_UNSAFE_ACCOUNT_WASM) throw new Error('KNOWN_UNSAFE_ACCOUNT_WASM');
 }
-export function requireApprovedAccountWasm(wasmHash: string): never {
+export function requireApprovedAccountWasm(wasmHash: string): void {
   rejectLegacyAccountWasm(wasmHash);
-  throw new Error('NO_APPROVED_SMART_ACCOUNT_WASM');
+  if (wasmHash.toLowerCase() !== SMART_ACCOUNT_KIT.accountWasmHash) throw new Error('ACCOUNT_WASM_NOT_ALLOWLISTED');
 }
