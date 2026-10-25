@@ -38,6 +38,28 @@ export async function claimEmail(accountID: string, value: string) {
     [email, accountID]);
   if (result.rowCount !== 1) throw Error('EMAIL_ALREADY_ASSIGNED');
 }
+export async function createEmailVerification(accountID: string) {
+  const code = String(randomBytes(4).readUInt32BE(0) % 100000000).padStart(8, '0');
+  await pool.query(
+    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at",
+    [accountID,hashToken(code)]);
+  return code;
+}
+export async function verifyEmail(accountID: string, code: string) {
+  if (!/^[0-9]{8}$/.test(code)) return false;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const verified = await client.query(
+      "DELETE FROM wallet_email_verifications WHERE account_id=$1 AND token_hash=$2 AND expires_at>NOW() RETURNING account_id",
+      [accountID,hashToken(code)]);
+    if (verified.rowCount !== 1) { await client.query('ROLLBACK'); return false; }
+    await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1 AND email IS NOT NULL',[accountID]);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
   if(!token || !/^[a-zA-Z0-9_-]{40,100}$/.test(token)) return null;
   const {rows} = await pool.query<{account_id:string}>('SELECT account_id FROM wallet_sessions WHERE token_hash=$1 AND expires_at>NOW()',[hashToken(token)]);
