@@ -63,3 +63,35 @@ it('can reach payment fields with the keyboard', async () => {
   await user.tab(); expect(document.activeElement).toBe(screen.getByLabelText('Exact amount (XLM)'));
   await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Preview payment' }));
 });
+
+it('saves the recovery key before a persistent preview and recovers its timeout without a replacement', async () => {
+  const adapter = service(); adapter.persistentPreview = true;
+  vi.mocked(adapter.prepare).mockImplementation(async (_intent, key) => {
+    expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBe(key);
+    throw Error('Preparation timed out. Check existing attempt.');
+  });
+  const user = userEvent.setup(); mount(<Send/>, adapter);
+  await user.type(screen.getByLabelText('Recipient address'), address);
+  await user.type(screen.getByLabelText('Exact amount (XLM)'), '1');
+  await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+  await screen.findByText('Preparation timed out. Check existing attempt.');
+  expect(screen.queryByRole('button', { name: 'Preview payment' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Check existing attempt' }));
+  expect(adapter.prepare).toHaveBeenCalledTimes(1); expect(adapter.createAttempt).not.toHaveBeenCalled(); expect(adapter.approve).not.toHaveBeenCalled();
+});
+it('gates send on a missing transaction signer even for an authenticated adapter', () => {
+  const adapter = service(); adapter.canSign = false; mount(<Send/>, adapter);
+  expect(screen.getByText('Signing service not connected')).toBeTruthy();
+});
+it('cancels the persisted preview before editing and only then clears the recovery key', async () => {
+  const adapter = service(); adapter.persistentPreview = true;
+  adapter.cancelAttempt = vi.fn(async () => ({ ...attempt, id: 'q', status: 'rejected' as const }));
+  const user = userEvent.setup(); mount(<Send/>, adapter);
+  await user.type(screen.getByLabelText('Recipient address'), address); await user.type(screen.getByLabelText('Exact amount (XLM)'), '1.0000001');
+  await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+  await screen.findByRole('button', { name: 'Edit payment' });
+  expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Edit payment' }));
+  await screen.findByRole('button', { name: 'Preview payment' });
+  expect(adapter.cancelAttempt).toHaveBeenCalledWith('q'); expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeNull();
+});

@@ -20,3 +20,12 @@ npm run build
 - Address regex is a UI shape check, not full StrKey checksum validation; backend must validate authoritatively.
 
 This implements frontend foundation A1–A3 **partially**; the live passkey wallet creation and smart-account dashboard remain blocked on Contributor B's implementation.
+
+
+## Existing authenticated wallets
+
+The connection form now supports passkey login for existing account and deployed
+wallet IDs, authenticated indexed balance, payment attempt/history reads, and a
+trusted transaction-signer injection point. See
+[Payment UI integration](../../docs/PAYMENT_UI_INTEGRATION.md) for endpoint mapping,
+proxy configuration and B1/B2 prerequisites. Initial wallet creation remains pending.
