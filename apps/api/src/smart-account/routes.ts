@@ -42,28 +42,25 @@ export async function registerSmartAccountRoutes(app: FastifyInstance, options: 
       return reply.code(503).send({ error: 'DEPLOYMENT_SERVICE_UNAVAILABLE' });
     }
   });
-
   app.get('/api/v1/smart-account/deployment', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {
       const bearer = request.headers.authorization;
       const accountID = await sessionAccount(bearer?.startsWith('Bearer ') ? bearer.slice(7) : undefined);
       if (!accountID) return reply.code(401).send({ error: 'AUTHENTICATION_REQUIRED' });
-      if (options.deployments) return options.deployments.status(accountID);
+      if (options.deployments) return await options.deployments.status(accountID);
       const { rows } = await db.query<{ status: string; contract_address: string | null; transaction_hash: string | null }>(
         'SELECT status, contract_address, transaction_hash FROM wallet_deployment_jobs WHERE account_id=$1', [accountID]);
       return rows.length ? { status: rows[0].status, address: rows[0].contract_address, transactionHash: rows[0].transaction_hash, deploymentEnabled: false } : { status: 'NOT_STARTED', deploymentEnabled: false };
     } catch { return reply.code(503).send({ error: 'DEPLOYMENT_SERVICE_UNAVAILABLE' }); }
   });
-
   app.get('/api/v1/smart-account/relayer', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {
       const relayer = testnetRelayer();
-      return { network: 'TESTNET', configured: relayer.configured, publicKey: relayer.configured ? relayer.publicKey() : null, deploymentEnabled: !!options.deployments };
+      return { network: 'TESTNET', configured: relayer.configured, publicKey: relayer.configured ? relayer.publicKey : null, deploymentEnabled: !!options.deployments };
     } catch { return reply.code(503).send({ error: 'RELAYER_CONFIGURATION_UNAVAILABLE' }); }
   });
-
   app.get('/api/v1/smart-account/capabilities', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     return {
@@ -76,7 +73,6 @@ export async function registerSmartAccountRoutes(app: FastifyInstance, options: 
       reason: options.deployments ? 'PRIMARY_DEPLOYMENT_ENABLED_BACKUP_RECOVERY_REQUIRED' : 'WALLET_DEPLOYMENT_AND_INDEPENDENT_RECOVERY_NOT_VERIFIED',
     };
   });
-
   app.get('/api/v1/smart-account/:address/status', {
     schema: { params: { type: 'object', required: ['address'], additionalProperties: false, properties: { address: { type: 'string', minLength: 56, maxLength: 56 } } } },
   }, async (request, reply) => {
