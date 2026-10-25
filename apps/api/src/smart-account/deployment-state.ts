@@ -6,7 +6,7 @@ export type DeploymentState = 'AWAITING_PASSKEY'|'PENDING'|'DEPLOYING'|'SUBMITTE
 type Job = { account_id:string; status:DeploymentState; lease_token:string|null; transaction_hash:string|null; contract_address:string|null; attempt_count:number };
 const allowed: Record<DeploymentState, readonly DeploymentState[]> = {
   AWAITING_PASSKEY:['PENDING'], PENDING:['DEPLOYING'], DEPLOYING:['SUBMITTED','RETRYABLE_FAILURE','FAILED'],
-  SUBMITTED:['CONFIRMED','RETRYABLE_FAILURE','FAILED'], CONFIRMED:['VERIFYING'],
+  SUBMITTED:['CONFIRMED','FAILED'], CONFIRMED:['VERIFYING'],
   VERIFYING:['ACTIVE','RETRYABLE_FAILURE','FAILED'], ACTIVE:[],
   RETRYABLE_FAILURE:['DEPLOYING'], FAILED:[],
 };
@@ -23,7 +23,7 @@ export class DeploymentStateStore {
         ORDER BY created_at,account_id FOR UPDATE SKIP LOCKED LIMIT 1`);
       const job=rows[0];
       if(!job){await client.query('COMMIT');return null;}
-      const token=randomUUID();
+      // Never claim a retry whose prior transaction may already exist on-chain.\n      if(job.transaction_hash){await client.query('ROLLBACK');throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');}\n      const token=randomUUID();
       await client.query(`UPDATE wallet_deployment_jobs SET status='DEPLOYING',lease_token=$2,
         lease_until=NOW()+INTERVAL '2 minutes',attempt_count=attempt_count+1,updated_at=NOW(),last_transition_at=NOW()
         WHERE account_id=$1`,[job.account_id,token]);
@@ -51,7 +51,7 @@ export class DeploymentStateStore {
       if(['CONFIRMED','VERIFYING','ACTIVE'].includes(next) && !address) throw Error('CONTRACT_ADDRESS_REQUIRED');
       // ACTIVE must be gated by independent on-chain verifier; never transition via generic state-store API.
       if(next==='ACTIVE') throw Error('VERIFIED_ACTIVATION_REQUIRED');
-      const retry=next==='RETRYABLE_FAILURE';
+      if(next==='RETRYABLE_FAILURE' && hash) throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');\n      const retry=next==='RETRYABLE_FAILURE';
       await client.query(`UPDATE wallet_deployment_jobs SET status=$3,transaction_hash=$4,contract_address=$5,
         failure_code=$6,retry_after=CASE WHEN $7::int IS NULL THEN NULL ELSE NOW()+($7::int * INTERVAL '1 second') END,
         lease_token=CASE WHEN $8 THEN NULL ELSE lease_token END,
