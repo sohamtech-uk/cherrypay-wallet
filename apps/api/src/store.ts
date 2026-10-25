@@ -61,3 +61,31 @@ export async function updateCounter(id:string,accountID:string,oldCounter:number
  const {rowCount}=await pool.query('UPDATE wallet_credentials SET counter=$1 WHERE id=$2 AND account_id=$3 AND counter=$4',[newCounter,id,accountID,oldCounter]);
  if(rowCount!==1)throw new Error('Credential counter changed concurrently');
 }
+
+export async function withLockedAccount<T>(accountID:string, work:(client:pg.PoolClient)=>Promise<T>):Promise<T>{
+ const client=await pool.connect();
+ try{
+  await client.query('BEGIN');
+  const lock=await client.query('SELECT id FROM wallet_accounts WHERE id=$1 FOR UPDATE',[accountID]);
+  if(!lock.rowCount)throw Error('Account not found');
+  const result=await work(client);
+  await client.query('COMMIT');
+  return result;
+ }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+export async function consumeLockedChallenge(client:pg.PoolClient,id:string,accountID:string,purpose:string,sessionToken?:string){
+ const result=await client.query('DELETE FROM wallet_challenges WHERE id=$1 AND account_id=$2 AND purpose=$3 AND expires_at>now() AND session_hash IS NOT DISTINCT FROM $4 RETURNING challenge',[id,accountID,purpose,sessionToken?hashToken(sessionToken):null]);
+ if(!result.rowCount)throw Error('Challenge expired, consumed or unauthorized');
+ return result.rows[0].challenge as string;
+}
+export async function credentialsLocked(client:pg.PoolClient,accountID:string){
+ const result=await client.query('SELECT id,public_key,counter,transports FROM wallet_credentials WHERE account_id=$1 ORDER BY created_at',[accountID]);
+ return result.rows as Awaited<ReturnType<typeof getCredentials>>;
+}
+export async function addCredentialLocked(client:pg.PoolClient,accountID:string,c:{id:string;publicKey:Uint8Array;counter:number;transports?:string[]}){
+ await client.query('INSERT INTO wallet_credentials(id,account_id,public_key,counter,transports) VALUES($1,$2,$3,$4,$5)',[c.id,accountID,Buffer.from(c.publicKey).toString('base64'),c.counter,JSON.stringify(c.transports??[])]);
+}
+export async function updateCounterLocked(client:pg.PoolClient,id:string,accountID:string,oldCounter:number,newCounter:number){
+ const result=await client.query('UPDATE wallet_credentials SET counter=$1 WHERE id=$2 AND account_id=$3 AND counter=$4',[newCounter,id,accountID,oldCounter]);
+ if(result.rowCount!==1)throw Error('Concurrent authentication detected');
+}
