@@ -31,7 +31,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   },30_000);
   it('applies identity and payment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_email_identity.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql']);
   });
   it('persists and revokes hashed sessions',async () => {
     const {token}=await createSession(account.id);
@@ -40,6 +40,17 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(result.rows[0].token_hash).not.toEqual(token);
     await revokeSession(token);
     expect(await sessionAccount(token)).toBeNull();
+  });
+  it('keeps legacy UUID sessions valid without presenting their ID as an email',async()=>{
+    const owner=randomUUID();
+    await db.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[owner,randomUUID()]);
+    const session=await createSession(owner);
+    const app=await buildApp({config:getConfig({WALLET_ORIGIN:'https://wallet.example'}),logger:false});
+    try {
+      const me=await app.inject({url:'/api/v1/wallet/me',headers:{authorization:`Bearer ${session.token}`}});
+      expect(me.statusCode).toBe(200);
+      expect(me.json()).toMatchObject({accountID:owner,email:null,emailVerified:false,walletDeploymentEnabled:false});
+    } finally {await revokeSession(session.token);await app.close();}
   });
   it('consumes a challenge once and serializes first-credential ownership',async () => {
     const requestId=await newChallenge(account.id,'register_initial','challenge');

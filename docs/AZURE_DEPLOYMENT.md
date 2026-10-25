@@ -101,6 +101,15 @@ Verify the hostname is secured in Azure, HTTP redirects to HTTPS, `/api/v1/netwo
 
 ## Verification and recovery
 
+Email identity upgrades use the additive `004_email_identity.sql` migration.
+Migrations 001–003 retain the original deployed checksums. The upgrade converts
+UUID ownership columns to text without changing existing IDs, passkey user handles,
+sessions, payment attempts or approval ownership. Original profiles can still sign
+in using **Use a legacy account ID**; newly created profiles use email IDs.
+Never clear the database or rewrite stored checksums to resolve a migration error.
+The PostgreSQL upgrade regression test seeds the previous schema and checks restart,
+ownership constraints and pending-payment preservation before deployment.
+
 `bash scripts/test-production-containers.sh` runs the compiled API against real PostgreSQL and nginx in the same network layout. It checks migrations/startup, SPA deep links, API routing, Origin rejection, disabled payments, independent IP rate limiting, and database-down readiness without killing the API. Unit tests cover database TLS downgrade attempts and readiness recovery. The smoke database is disposable and isolated; real deployments always use verified TLS.
 
 For deployment failures, retain the previous healthy revision, inspect only redacted API diagnostic codes, and fix the failing dependency before retrying. Record the previous revision and image digests before a release. Reactivating an old revision does not undo SQL migrations or Azure app-level secret changes: this is not a database rollback strategy. Never drop tables or restore over the live database to resolve a failed container rollout.

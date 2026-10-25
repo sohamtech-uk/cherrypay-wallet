@@ -5,6 +5,7 @@ import { parseDeployment, type DeploymentView } from './deployment';
 import type { PaymentAdapter } from './model';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
+const legacyAccountId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
@@ -18,6 +19,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
   const [email, setEmail] = useState(savedAccountId);
+  const [legacyLogin, setLegacyLogin] = useState(() => legacyAccountId.test(savedAccountId()));
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -197,8 +199,14 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
     </> : <>
-      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Email address (Account ID)</label><input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
-      <button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
+      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
+        <label><input type="checkbox" checked={legacyLogin} onChange={e => setLegacyLogin(e.target.checked)}/>Use a legacy account ID</label>
+        <label htmlFor="account-id">{legacyLogin ? 'Existing account ID' : 'Email address (Account ID)'}</label>
+        <input id="account-id" type={legacyLogin ? 'text' : 'email'} value={email} onChange={e => setEmail(e.target.value)} required autoComplete={legacyLogin ? 'off' : 'email'}/>
+        {legacyLogin && <p>Use the account ID saved when you created your original passkey profile. Your existing passkey is still required.</p>}
+        <button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button>
+      </fieldset></form>
+      <button className="secondary-button" disabled={busy || legacyLogin} onClick={() => void register(false)}>Create passkey profile</button>
       <p>New here? Create a profile, save its account ID, then add another passkey. Your device manages the passkeys.</p>
     </>}
     {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}

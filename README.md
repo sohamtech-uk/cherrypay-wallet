@@ -13,4 +13,6 @@ The application uses its own **PostgreSQL 17** database and versioned SQL migrat
 
 **Indexing target:** this repository uses Stellar SDK/RPC event reads and persistent PostgreSQL history/cursors. Envio currently supports EVM, SVM and Fuel, not Stellar/Soroban ([supported platforms](https://docs.envio.dev/docs/HyperIndex/overview)). The separate `Monad-Metropolis` Envio deployment is not this wallet's indexer. Connecting this repository to Envio does not provide Stellar Testnet support; no Envio deployment is required for this application.
 
+Use [Stellar Skills and ecosystem integration guidance](docs/STELLAR_ECOSYSTEM_GUIDE.md) for reusable wallet, indexing and cross-chain components. [AGENTS.md](AGENTS.md) routes implementation work to the relevant skills. The guide distinguishes existing code from candidates such as Goldsky Turbo indexing and Circle CCTP Testnet transfers.
+
 Never commit secrets, expose production signing keys to AI agents, or use mainnet funds. No real wallet payment is enabled until contract/policy/recovery security gates pass.
