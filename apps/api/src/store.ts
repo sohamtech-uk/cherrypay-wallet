@@ -20,7 +20,7 @@ export async function createAccount(email?: string) {
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[id,userID]);
   return {id,webauthn_user_id:userID};
 }
-/** Emails are lookup identifiers; account UUIDs remain permanent ownership keys. */
+/** Normalized email is the canonical account ID and permanent ownership key. */
 export function normalizeEmail(value: string): string {
   const email = value.trim().toLowerCase();
   if (email.length > 254 || !/^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/.test(email)) throw Error('INVALID_EMAIL');
@@ -48,14 +48,14 @@ export async function verifyEmail(accountID: string, code: string) {
       "DELETE FROM wallet_email_verifications WHERE account_id=$1 AND token_hash=$2 AND expires_at>NOW() RETURNING account_id",
       [accountID,hashToken(code)]);
     if (verified.rowCount !== 1) { await client.query('ROLLBACK'); return false; }
-    
+    await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1', [accountID]);
     await client.query('COMMIT');
     return true;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
 export async function emailForAccount(accountID: string) {
-  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>('SELECT id AS email, NULL AS email_verified_at FROM wallet_accounts WHERE id=$1',[accountID]);
+  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>('SELECT id AS email, email_verified_at FROM wallet_accounts WHERE id=$1',[accountID]);
   return rows[0];
 }
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
