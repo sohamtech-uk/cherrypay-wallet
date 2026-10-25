@@ -20,7 +20,7 @@ export async function finishRegistration(accountID:string,requestID:string,respo
   await store.addCredentialLocked(client,accountID,{id:c.id,publicKey:c.publicKey,counter:c.counter,transports:response.response.transports});
   return credentials.length+1;
  });
- return {verified:true,accountID,credentialCount:count,recoveryReady:count>=2,...await store.createSession(accountID)};
+ return {verified:true,accountID,credentialCount:count,backupCredentialEnrolled:count>=2,recoveryReady:false,...await store.createSession(accountID)};
 }
 export async function beginAuthentication(accountID:string,rpID:string){
  const credentials=await store.getCredentials(accountID);
@@ -40,5 +40,6 @@ export async function finishAuthentication(accountID:string,requestID:string,res
  });
  return {verified:true,accountID,credentialCount:count,...await store.createSession(accountID)};
 }
+
 
 

@@ -1,12 +1,14 @@
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
+import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
+import type { PaymentDependencies } from './payments/routes.js';
 import type { PaymentService } from './payments/service.js';
 import { startPaymentWorker } from './payments/worker.js';
 import { registerPaymentRoutes } from './payments/routes.js';
 import Fastify from 'fastify';
 import {getConfig} from './config.js';
 import {beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
-import {sessionAccount,getCredentials,revokeSession} from './store.js';
-export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; logger?: boolean } = {}) {
+import {sessionAccount,hashToken,getCredentials,revokeSession} from './store.js';
+export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean } = {}) {
 const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
 const token=(h:string|undefined)=>h?.startsWith('Bearer ')?h.slice(7):undefined;
 const attempts=new Map<string,{count:number;reset:number}>();
@@ -19,16 +21,18 @@ app.post('/api/v1/passkeys/registration/options',async(req,reply)=>{try{const id
 app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});return await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);}catch{return reply.code(400).send({error:'Cannot verify enrollment'});}});
 app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{return await beginAuthentication((req.body as {accountID:string}).accountID,config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
 app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
-app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,recoveryReady:credentials.length>=2,walletDeploymentEnabled:false};});
+app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:false};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 await registerSmartAccountRoutes(app);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 await registerPaymentRoutes(app, options.payments ? {
   service: options.payments,
+  receiveRoute: options.receiveRoute,
+  approvals: options.passkeyCodec ? new PasskeyApprovalService(options.payments, new PostgresApprovalTickets(), options.passkeyCodec, postgresAssertionVerifier(config.rpID, config.origin), config.rpID) : undefined,
   origin: config.origin,
   authenticate: async request => {
     const subject = await sessionAccount(token(request.headers.authorization));
-    return subject ? { subject } : null;
+    return subject ? { subject, sessionHash: hashToken(token(request.headers.authorization)!) } : null;
   },
 } : undefined);
 if (options.payments) {
@@ -40,3 +44,4 @@ if (options.payments) {
 }
 return app;
 }
+

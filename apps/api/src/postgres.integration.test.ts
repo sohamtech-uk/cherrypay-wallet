@@ -1,3 +1,7 @@
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { isoCBOR } from '@simplewebauthn/server/helpers';
+import { PostgresApprovalTickets, postgresAssertionVerifier } from './payments/passkey-approval.js';
+import { hashToken } from './store.js';
 import { buildApp } from './app.js';
 import { getConfig } from './config.js';
 import { PaymentService } from './payments/service.js';
@@ -23,7 +27,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   },30_000);
   it('applies identity and payment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql']);
   });
   it('persists and revokes hashed sessions',async () => {
     const {token}=await createSession(account.id);
@@ -148,5 +152,44 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(rows[0].attempt_id).toBe(attempt.id);
     await repository.finish(lease.attempt,lease.token);
   });
+  it('consumes transfer approvals once across workers and rejects other/revoked sessions',async()=>{
+    const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'1',maxFeeStroops:'100'};
+    const a=await repository.create(wallet,intent,'ticket_'+randomUUID());
+    const session=await createSession(account.id);
+    const tickets=new PostgresApprovalTickets(db), restarted=new PostgresApprovalTickets(db);
+    const t={id:randomUUID(),owner:account.id,walletId:wallet.id,attemptId:a.id,sessionHash:hashToken(session.token),binding:{challenge:'a'.repeat(43),credentialIds:['credential'],policy:wallet.policy,authHash:'b'.repeat(64),requestDigest:a.requestDigest},expiresAt:Date.now()+60000};
+    await tickets.put(t);
+    await expect(tickets.take(t.id,account.id,wallet.id,a.id,'other')).rejects.toThrow();
+    const results=await Promise.allSettled([tickets.take(t.id,account.id,wallet.id,a.id,t.sessionHash),restarted.take(t.id,account.id,wallet.id,a.id,t.sessionHash)]);
+    expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+    await tickets.put({...t,id:randomUUID()});
+    await revokeSession(session.token);
+    const {rows}=await db.query('SELECT id FROM wallet_transfer_approvals WHERE session_hash=$1',[t.sessionHash]);expect(rows).toHaveLength(0);
+    await expect(tickets.put({...t,id:randomUUID()})).rejects.toThrow('AUTHENTICATION_REQUIRED');
+    const lease=await repository.claim(a.id,['preparing']);lease.attempt.status='rejected';await repository.finish(lease.attempt,lease.token);
+  });
+  it('verifies real P-256 transfer assertions, origin, challenge and counter under a database lock',async()=>{
+    const owner=await createAccount(), credentialId=Buffer.from(randomUUID()).toString('base64url');
+    const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
+    const jwk=publicKey.export({format:'jwk'});
+    const cose=new Map<number,number|Uint8Array>([[1,2],[3,-7],[-1,1],[-2,new Uint8Array(Buffer.from(jwk.x!,'base64url'))],[-3,new Uint8Array(Buffer.from(jwk.y!,'base64url'))]]);
+    await withLockedAccount(owner.id,c=>addCredentialLocked(c,owner.id,{id:credentialId,publicKey:isoCBOR.encode(cose),counter:0,transports:['internal']}));
+    const challenge=Buffer.alloc(32,7).toString('base64url');
+    const assertion=(origin:string,challengeValue:string,counter:number)=>{
+      const client=Buffer.from(JSON.stringify({type:'webauthn.get',challenge:challengeValue,origin,crossOrigin:false}));
+      const auth=Buffer.concat([createHash('sha256').update('wallet.example').digest(),Buffer.from([5]),Buffer.alloc(4)]);auth.writeUInt32BE(counter,33);
+      const signature=sign('sha256',Buffer.concat([auth,createHash('sha256').update(client).digest()]),privateKey);
+      return {id:credentialId,rawId:credentialId,type:'public-key' as const,response:{clientDataJSON:client.toString('base64url'),authenticatorData:auth.toString('base64url'),signature:signature.toString('base64url')},clientExtensionResults:{}};
+    };
+    const verify=postgresAssertionVerifier('wallet.example','https://wallet.example');
+    await expect(verify(owner.id,assertion('https://evil.example',challenge,1),challenge,[credentialId])).rejects.toThrow();
+    await expect(verify(owner.id,assertion('https://wallet.example','wrong-challenge',1),challenge,[credentialId])).rejects.toThrow();
+    const valid=assertion('https://wallet.example',challenge,1);
+    await verify(owner.id,valid,challenge,[credentialId]);
+    await expect(verify(owner.id,valid,challenge,[credentialId])).rejects.toThrow();
+    await expect(verify(owner.id,assertion('https://wallet.example',challenge,2),challenge,['not-authorized'])).rejects.toThrow('CREDENTIAL_NOT_AUTHORIZED');
+  });
+
 });
+
 

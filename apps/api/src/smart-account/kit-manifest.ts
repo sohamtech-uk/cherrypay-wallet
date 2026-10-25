@@ -17,7 +17,7 @@ export const SMART_ACCOUNT_KIT = Object.freeze({
   webauthnVerifierWasmHash: 'e63a030d0f1a1481e36059a4837c433083b33e704c1f9625b7314795b6d72b76',
   sourceCommit: '1e513890ecf79833c9d6e7ef38a9358001c0b111',
   deploymentManifest: 'https://github.com/stellar/smart-account-kit/blob/main/docs/deployments-protocol-27-2026-07-09.md',
-  securityStatus: 'SDK_UNAUDITED',
+  securityStatus: 'BLOCKED_LEGACY_ACCOUNT_WASM',
   deploymentEnabled: false,
   spendingEnabled: false,
 } as const);
@@ -25,4 +25,11 @@ export const SMART_ACCOUNT_KIT = Object.freeze({
 /** A release number alone is not a reproducible dependency lock. */
 export function requireSmartAccountIntegrationReady(): never {
   throw new Error('SMART_ACCOUNT_KIT_NOT_VERIFIED_OR_INSTALLED');
+}
+
+
+/** Upstream auth-digest-scheme.ts identifies this original artifact as predating
+ * GHSA-jpg9-m7w4-c7wc. Never provision it, including on Testnet. */
+export function rejectLegacyAccountWasm(wasmHash: string): void {
+  if (wasmHash.toLowerCase() === SMART_ACCOUNT_KIT.accountWasmHash) throw new Error('KNOWN_UNSAFE_ACCOUNT_WASM');
 }

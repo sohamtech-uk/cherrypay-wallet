@@ -107,3 +107,17 @@ The default executable still supplies no payment runtime and returns 503 for pay
 routes. This change does not deploy a contract or establish transaction-bound WebAuthn
 signing. Sunil's verified contract/policy adapter remains the prerequisite for enabling
 transfers and connecting the frontend. Wallet deployment remains disabled.
+
+
+## Transfer-bound WebAuthn
+
+Migration 003 adds one-use session-bound approval tickets. Trusted composition may
+supply a `ContractPasskeyCodec` to `buildApp`; this advertises WebAuthn approval and
+registers begin/finish routes. The codec must derive challenges from the deployed
+contract's current authorization scheme, not login challenges. PostgreSQL verifies
+the credential, RP, origin, user verification and counter before the existing
+payment engine enforces the signed contract authorization. No default codec is
+provided. See [workshop status](WORKSHOP_PHASE_STATUS.md).
+
+Identity endpoints now report `backupCredentialEnrolled` separately and leave
+`recoveryReady: false`: a second database credential never proves on-chain recovery.

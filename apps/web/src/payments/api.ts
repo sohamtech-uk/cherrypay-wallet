@@ -1,3 +1,4 @@
+import { startAuthentication } from '@simplewebauthn/browser';
 import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind } from './model';
 
 export class ApiError extends Error {
@@ -28,7 +29,7 @@ const statuses: Record<string, AttemptStatus> = { preparing: 'pending', awaiting
 export type TransferApproval = { attemptId: string; walletId: string; intent: Intent; feeStroops: string; authXdr: string; expiresAt: string; expirationLedger: number };
 /** B2 must validate and sign this exact Soroban authorization, never a login challenge. */
 export type TransferSigner = (approval: TransferApproval) => Promise<string>;
-export async function connectPaymentAdapter(api: ApiClient, walletId: string, signer?: TransferSigner): Promise<PaymentAdapter> {
+export async function connectPaymentAdapter(api: ApiClient, walletId: string, signer?: TransferSigner, authenticate = startAuthentication): Promise<PaymentAdapter> {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(walletId)) throw Error('Enter a valid wallet ID.');
   const base = `wallets/${encodeURIComponent(walletId)}`;
   const wallet = object(await api(base));
@@ -61,10 +62,10 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
     checkQuote(q, a); return q;
   };
   const adapter: PaymentAdapter = {
-    network: NETWORK, address, supportedDestinations, canSign: !!signer, persistentPreview: true,
+    network: NETWORK, address, supportedDestinations, canSign: !!signer || wallet.approvalMode === 'webauthn', persistentPreview: true,
     getBalance: balance,
     async prepare(intent, key) {
-      if (!signer) throw Error('Transaction signing is not connected.');
+      if (!signer && wallet.approvalMode !== 'webauthn') throw Error('Transaction signing is not connected.');
       if (!key) throw Error('A saved recovery key is required before preparation.');
       if (intent.network !== NETWORK || intent.from !== address || destinationError(intent.destination, supportedDestinations) || intent.destination === address || BigInt(integer(intent.amountStroops)) <= 0n) throw Error('Unsupported payment intent.');
       const raw = object(await api(`${base}/attempts`, { network: NETWORK, destination: intent.destination, amountStroops: intent.amountStroops, maxFeeStroops: '10000000' }, { 'Idempotency-Key': key }));
@@ -77,13 +78,26 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       return found;
     },
     async approve(id, reviewed) {
-      if (!signer || !reviewed) throw Error('A transaction signer and reviewed payment are required.');
+      if ((!signer && wallet.approvalMode !== 'webauthn') || !reviewed) throw Error('A transaction signer and reviewed payment are required.');
       const { raw, attempt } = await read(id);
       const q = await quoteFor(raw); checkQuote(q, reviewed);
       if (reviewed.id !== id || reviewed.feeStroops !== q.feeStroops || reviewed.expiresAt !== q.expiresAt || reviewed.feePayer !== q.feePayer) throw Error('Payment preview changed. Review the existing attempt again.');
       const approval = object(raw.approval);
       if (!Number.isSafeInteger(approval.expirationLedger) || Number(approval.expirationLedger) <= 0) throw Error('Invalid authorization expiration.');
-      const authXdr = await signer({ attemptId: id, walletId, intent: { network: NETWORK, from: address, destination: attempt.destination, amountStroops: attempt.amountStroops }, feeStroops: q.feeStroops, authXdr: text(approval.authXdr), expiresAt: q.expiresAt, expirationLedger: Number(approval.expirationLedger) });
+      if (!signer && wallet.approvalMode === 'webauthn') {
+        const begin = object(await api(`${base}/attempts/${encodeURIComponent(id)}/approval/options`, {}));
+        const offered = object(begin.attempt), offeredAttempt = parse(offered);
+        const offeredApproval = object(offered.approval);
+        if (offeredAttempt.id !== id || offeredAttempt.destination !== reviewed.destination || offeredAttempt.amountStroops !== reviewed.amountStroops || offeredAttempt.feeStroops !== reviewed.feeStroops || offeredAttempt.status !== 'awaiting_approval' || offeredApproval.authXdr !== approval.authXdr || offeredApproval.expiresAt !== q.expiresAt || Date.parse(date(begin.expiresAt)) <= Date.now()) throw Error('Approval challenge differs from the reviewed payment.');
+        const options = object(begin.options);
+        if (options.userVerification !== 'required' || !/^[A-Za-z0-9_-]{43}$/.test(text(options.challenge)) || !Array.isArray(options.allowCredentials) || options.allowCredentials.length === 0) throw Error('Invalid transfer approval options.');
+        const response = await authenticate({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+        checkQuote(q, reviewed);
+        const result = parse(await api(`${base}/attempts/${encodeURIComponent(id)}/approval/verify`, { requestID: text(begin.requestID), response }));
+        if (result.id !== id || result.destination !== reviewed.destination || result.amountStroops !== reviewed.amountStroops) throw Error('Approval response mismatch. Check existing attempt.');
+        return result;
+      }
+      const authXdr = await signer!({ attemptId: id, walletId, intent: { network: NETWORK, from: address, destination: attempt.destination, amountStroops: attempt.amountStroops }, feeStroops: q.feeStroops, authXdr: text(approval.authXdr), expiresAt: q.expiresAt, expirationLedger: Number(approval.expirationLedger) });
       checkQuote(q, reviewed);
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(authXdr) || authXdr.length > 16000) throw Error('Invalid signed authorization.');
       const result = parse(await api(`${base}/attempts/${encodeURIComponent(id)}/approve`, { authXdr }));

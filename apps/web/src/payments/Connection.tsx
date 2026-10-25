@@ -10,6 +10,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [accountId, setAccountId] = useState('');
   const [walletId, setWalletId] = useState('');
+  const [canSign, setCanSign] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -29,7 +30,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       const adapter = await connectPaymentAdapter(api, walletId.trim(), signer);
       clearTimeout(expiry.current);
       expiry.current = setTimeout(() => { token.current = undefined; setConnected(false); setBalance(''); onConnect(null); setError('Your session expired. Reconnect with your passkey.'); }, Number(session.expiresInSeconds) * 1000);
-      onConnect(adapter); setConnected(true);
+      onConnect(adapter); setCanSign(adapter.canSign !== false); setConnected(true);
       try { const snapshot = await adapter.getBalance!(); setBalance(snapshot ? `${xlm(snapshot.amountStroops)} XLM · ledger ${snapshot.ledger}` : 'Balance awaiting indexing'); } catch { setBalance('Balance temporarily unavailable'); }
     } catch (e) {
       if (token.current) { try { await api('session/logout', {}); } catch { /* Local authority is removed even if revocation cannot reach the API. */ } }
@@ -44,6 +45,6 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     finally { token.current = undefined; clearTimeout(expiry.current); onConnect(null); setConnected(false); setBalance(''); lock.current = false; setBusy(false); }
   }
   return <section className="card payment-screen" aria-label="Payment service connection"><h2>Connect an existing passkey wallet</h2><p>Use the account ID and deployed wallet ID supplied during wallet setup. A watch-only address cannot authorize payments.</p>
-    {connected ? <><p role="status">Wallet connected. {balance}</p><p>{signer ? 'Transaction signer connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p><button disabled={busy} onClick={() => void disconnect()}>Disconnect wallet</button></> : <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Account ID</label><input id="account-id" value={accountId} onChange={e => setAccountId(e.target.value)} required autoComplete="off"/><label htmlFor="wallet-id">Deployed wallet ID</label><input id="wallet-id" value={walletId} onChange={e => setWalletId(e.target.value)} required autoComplete="off"/><button type="submit">{busy ? 'Connecting…' : 'Connect with passkey'}</button></fieldset></form>}
+    {connected ? <><p role="status">Wallet connected. {balance}</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p><button disabled={busy} onClick={() => void disconnect()}>Disconnect wallet</button></> : <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Account ID</label><input id="account-id" value={accountId} onChange={e => setAccountId(e.target.value)} required autoComplete="off"/><label htmlFor="wallet-id">Deployed wallet ID</label><input id="wallet-id" value={walletId} onChange={e => setWalletId(e.target.value)} required autoComplete="off"/><button type="submit">{busy ? 'Connecting…' : 'Connect with passkey'}</button></fieldset></form>}
     {error && <p role="alert" className="error">{error}</p>}</section>;
 }

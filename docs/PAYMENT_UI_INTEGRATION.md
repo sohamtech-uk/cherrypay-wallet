@@ -70,3 +70,19 @@ before preparation, timeout recovery, preview mutation and rejected signing.
 A real browser/Testnet create → recover → receive → send → verify acceptance run is
 still required after the B1/B2 adapter and receive metadata are supplied. No live
 transfer or contract deployment is claimed by these adapter tests.
+
+
+## Server-mediated passkey approval
+
+When trusted startup supplies `passkeyCodec`, wallet metadata advertises
+`approvalMode: 'webauthn'`. The adapter calls `/attempts/:id/approval/options`, checks
+the returned persisted intent and expiry against the review, requests WebAuthn with
+user verification, then posts `{ requestID, response }` to `/approval/verify`.
+The API verifies the assertion against its one-use session-bound ticket before
+contract encoding and enforced simulation. Injected external signers remain
+supported for a separately verified B1/B2 integration.
+
+The backend can supply `receiveRoute: verifiedReceiveRoutes(...)` after approved
+contract and recovery evidence is recorded. No route is inferred from outbound
+support. See [workshop status](WORKSHOP_PHASE_STATUS.md) for the actual remaining
+live gates and the legacy artifact that must not be deployed.
