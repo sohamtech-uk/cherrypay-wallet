@@ -1,6 +1,6 @@
 # wallet.cherrymoney.co.uk on Azure (Stellar Testnet)
 
-The deployment source is ready for an Azure account connection. No Azure resource, DNS record, or certificate has been created by adding these files. The shared ChatGPT implementation plan was inaccessible; this deployment implements the repository's existing Testnet scope.
+The deployment source is implemented; provisioning still requires the target Azure configuration and dedicated database. No Azure resource, DNS record, or certificate has been created by adding these files. The shared ChatGPT implementation plan was inaccessible; this deployment implements the repository's existing Testnet scope.
 
 ## Runtime
 

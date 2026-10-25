@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cleanup() { docker rm -f wallet-web wallet-api wallet-pg >/dev/null 2>&1 || true; docker network rm wallet-smoke >/dev/null 2>&1 || true; }
+test_name="wallet-smoke-$$-$RANDOM"
+cleanup() { docker rm -f "$test_name-web" "$test_name-api" "$test_name-pg" >/dev/null 2>&1 || true; docker network rm "$test_name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 docker build -t wallet-api-smoke -f apps/api/Dockerfile.production apps/api
 docker build -t wallet-web-smoke -f apps/web/Dockerfile.production apps/web
-docker network create wallet-smoke >/dev/null
-docker run -d --name wallet-pg --network wallet-smoke -e POSTGRES_USER=wallet -e POSTGRES_PASSWORD=smoke_test_only -e POSTGRES_DB=wallet postgres:17 >/dev/null
+docker network create "$test_name" >/dev/null
+docker run -d --name "$test_name-pg" --network "$test_name" -e POSTGRES_USER=wallet -e POSTGRES_PASSWORD=smoke_test_only -e POSTGRES_DB=wallet postgres:17 >/dev/null
 # Same network namespace models both containers inside one Container App.
 # Test fixture uses plaintext PostgreSQL only on this isolated Docker network.
-docker run -d --name wallet-api --network wallet-smoke -p 127.0.0.1:8080:8080 -e NODE_ENV=test -e DB_SSL=false -e DB_HOST=wallet-pg -e DB_NAME=wallet -e DB_USER=wallet -e DB_PASSWORD=smoke_test_only -e WALLET_ORIGIN=http://localhost:8080 wallet-api-smoke >/dev/null
-docker run -d --name wallet-web --network container:wallet-api wallet-web-smoke >/dev/null
+docker run -d --name "$test_name-api" --network "$test_name" -p 127.0.0.1:8080:8080 -e NODE_ENV=test -e DB_SSL=false -e "DB_HOST=$test_name-pg" -e DB_NAME=wallet -e DB_USER=wallet -e DB_PASSWORD=smoke_test_only -e WALLET_ORIGIN=http://localhost:8080 wallet-api-smoke >/dev/null
+docker run -d --name "$test_name-web" --network "container:$test_name-api" wallet-web-smoke >/dev/null
 for attempt in {1..60}; do
   if curl -fsS http://localhost:8080/ready >/dev/null 2>&1; then break; fi
-  if [[ "$attempt" == 60 ]]; then echo 'Production container startup failed'; docker logs wallet-api; exit 1; fi
+  if [[ "$attempt" == 60 ]]; then echo 'Production container startup failed'; docker logs "$test_name-api"; exit 1; fi
   sleep 2
 done
 node --input-type=module <<'JS'
@@ -35,7 +36,7 @@ assert.equal((await enroll('192.0.2.1')).status,429);
 assert.equal((await enroll('192.0.2.2')).status,200);
 console.log('Compiled API, migrations, SPA, same-origin API, disabled payments, origin and proxy rate limits passed');
 JS
-docker stop wallet-pg >/dev/null
-status=$(curl -s -o /tmp/wallet-readiness.json -w '%{http_code}' http://localhost:8080/ready)
+docker stop "$test_name-pg" >/dev/null
+status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ready)
 [[ "$status" == 503 ]]
 curl -fsS http://localhost:8080/health >/dev/null

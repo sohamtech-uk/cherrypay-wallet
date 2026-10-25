@@ -8,8 +8,10 @@ done
 command -v az >/dev/null
 command -v node >/dev/null
 az account show --query id -o tsv >/dev/null
+[[ -z "$(git status --porcelain)" ]] || { echo 'Deploy from a clean checkout' >&2; exit 1; }
 export WALLET_RELEASE_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 [[ "$WALLET_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full commit SHA is required' >&2; exit 1; }
+[[ "$WALLET_RELEASE_SHA" == "$(git rev-parse HEAD)" ]] || { echo 'Release SHA does not match checkout' >&2; exit 1; }
 export WALLET_REGISTRY_SERVER
 WALLET_REGISTRY_SERVER=$(az acr show --name "$AZURE_CONTAINER_REGISTRY" --query loginServer -o tsv)
 umask 077
