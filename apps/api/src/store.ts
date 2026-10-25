@@ -20,7 +20,7 @@ export async function initializeStore(){
  const present=new Set(rows.map(row=>row.name as string));
  if(expected.every(name=>present.has(name)))return;
  // DDL is idempotent and does not modify unrelated Cherry Money tables.
- for(const statement of schema.split(';').map(part=>part.replace(/^\\s*--[^\\n]*\\n/gm,'').trim()).filter(Boolean)){
+ for(const statement of schema.split(';').map(part=>part.replace(/^\s*--[^\n]*\n/gm,'').trim()).filter(Boolean)){
   await pool.query(statement);
  }
  const [after]=await pool.query<RowDataPacket[]>(
