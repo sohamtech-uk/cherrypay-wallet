@@ -2,9 +2,15 @@ import { buildApp } from './app.js';
 import { getConfig } from './config.js';
 import { initializeStore, db } from './store.js';
 import { configuredPayments } from './smart-account/manifest.js';
+import { configuredDeployments } from './smart-account/automatic-deployment.js';
 import { initializeStoreWithRetry } from './database-startup.js';
 
-const defaults = { initialize: initializeStore, payments: configuredPayments, build: buildApp, closeStore: () => db.end() };
+const defaults = {
+  initialize: initializeStore,
+  payments: async (env: NodeJS.ProcessEnv) => ({ ...(await configuredPayments(env)), deployments: await configuredDeployments(env) }),
+  build: buildApp,
+  closeStore: () => db.end(),
+};
 /** No listener or monitor starts until migrations and configured runtime checks pass. */
 export async function startServer(env: NodeJS.ProcessEnv = process.env, dependencies = defaults, signal?: AbortSignal) {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
