@@ -13,6 +13,7 @@ import { PostgresPaymentRepository } from './payments/postgres-repository.js';
 import { type Intent, type TransferEvent, type Wallet } from './payments/model.js';
 import { provisionAccounts } from './smart-account/provision.js';
 import { manifestFixture } from './smart-account/test-support/manifest.js';
+import { testPasskey } from './test-passkey.js';
 import { StrKey } from '@stellar/stellar-sdk';
 
 const integration = process.env.RUN_DB_INTEGRATION==='1' ? describe : describe.skip;
@@ -54,6 +55,54 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(result.filter(x=>x.status==='rejected')).toHaveLength(1);
     const {rows}=await db.query('SELECT count(*)::int AS total FROM wallet_credentials WHERE account_id=$1',[account.id]);
     expect(rows[0].total).toBe(1);
+  });
+  it('enrolls primary and additional passkeys through HTTP with session-bound challenges and real verification',async()=>{
+    const app=await buildApp({config:getConfig({WALLET_ORIGIN:'https://wallet.example'}),logger:false});
+    const post=(path:string,payload:Record<string,unknown>,token?:string)=>app.inject({method:'POST',url:`/api/v1/${path}`,headers:{origin:'https://wallet.example',...(token?{authorization:`Bearer ${token}`}:{})},payload});
+    try {
+      const primary=testPasskey(),backup=testPasskey();
+      const initial=(await post('passkeys/registration/options',{})).json();
+      expect(initial.options.pubKeyCredParams).toEqual([{alg:-7,type:'public-key'}]);
+      const enrolled=await post('passkeys/registration/verify',{accountID:initial.accountID,requestID:initial.requestID,response:primary.registration(initial.options.challenge)});
+      expect(enrolled.statusCode).toBe(200);const first=enrolled.json();
+      expect(first).toMatchObject({verified:true,credentialCount:1,recoveryReady:false});
+      expect((await post('passkeys/registration/options',{accountID:first.accountID})).statusCode).toBe(403);
+      const second=(await post('passkeys/registration/options',{accountID:first.accountID},first.token)).json();
+      expect(second.options.excludeCredentials.map((c:{id:string})=>c.id)).toContain(primary.id);
+      const payload={accountID:first.accountID,requestID:second.requestID,response:backup.registration(second.options.challenge)};
+      const otherSession=await createSession(first.accountID);
+      expect((await post('passkeys/registration/verify',payload,otherSession.token)).statusCode).toBe(400);
+      const foreign=await createAccount(),foreignSession=await createSession(foreign.id);
+      expect((await post('passkeys/registration/verify',payload,foreignSession.token)).statusCode).toBe(403);
+      const added=await post('passkeys/registration/verify',payload,first.token);
+      expect(added.statusCode).toBe(200);const next=added.json();
+      expect(next).toMatchObject({credentialCount:2,backupCredentialEnrolled:true,recoveryReady:false});
+      expect((await post('passkeys/registration/verify',payload,first.token)).statusCode).toBe(400);
+      await post('session/logout',{},first.token);
+      expect(await sessionAccount(first.token)).toBeNull();expect(await sessionAccount(next.token)).toBe(first.accountID);
+      // The new credential really works for sign-in, without claiming on-chain recovery.
+      const login=(await post('passkeys/authentication/options',{accountID:first.accountID})).json();
+      const signedIn=await post('passkeys/authentication/verify',{accountID:first.accountID,requestID:login.requestID,response:backup.authentication(login.options.challenge)});
+      expect(signedIn.statusCode).toBe(200);expect(signedIn.json()).toMatchObject({accountID:first.accountID,credentialCount:2});
+      const me=await app.inject({url:'/api/v1/wallet/me',headers:{authorization:`Bearer ${signedIn.json().token}`}});
+      expect(me.json()).toMatchObject({credentialCount:2,recoveryReady:false,walletDeploymentEnabled:false});
+      await Promise.all([next.token,otherSession.token,foreignSession.token,signedIn.json().token].map(t=>revokeSession(t)));
+    } finally {await app.close();}
+  });
+  it('rejects unsupported enrollment algorithms, wrong origins and missing user verification without saving credentials',async()=>{
+    const app=await buildApp({config:getConfig({WALLET_ORIGIN:'https://wallet.example'}),logger:false});
+    const post=(path:string,payload:Record<string,unknown>)=>app.inject({method:'POST',url:`/api/v1/passkeys/registration/${path}`,headers:{origin:'https://wallet.example'},payload});
+    try {
+      for(const failure of ['algorithm','origin','verification']) {
+        const key=testPasskey(failure==='algorithm'?'EdDSA':'ES256');
+        const initial=(await post('options',{})).json();
+        const response=key.registration(initial.options.challenge,failure==='origin'?'https://evil.example':'https://wallet.example',failure!=='verification');
+        expect((await post('verify',{accountID:initial.accountID,requestID:initial.requestID,response})).statusCode).toBe(400);
+        const result=await db.query('SELECT id FROM wallet_credentials WHERE account_id=$1',[initial.accountID]);
+        expect(result.rows).toEqual([]);
+        const sessions=await db.query('SELECT token_hash FROM wallet_sessions WHERE account_id=$1',[initial.accountID]);expect(sessions.rows).toEqual([]);
+      }
+    } finally {await app.close();}
   });
   it('scopes wallets to the authenticated owner',async () => {
     expect(await repository.wallet(wallet.id,account.id)).toMatchObject(wallet);

@@ -18,7 +18,7 @@ describe('PostgreSQL enrollment wiring regression', () => {
   it('creates the initial account and challenge through the persistent store', async () => {
     expect(await beginRegistration('localhost')).toMatchObject({ accountID: 'server-generated-account', requestID: 'persisted-request-id' });
     expect(mocks.newChallenge).toHaveBeenCalledWith('server-generated-account', 'register_initial', 'registration-challenge', undefined);
-    expect(mocks.generateRegistrationOptions).toHaveBeenCalledWith(expect.objectContaining({ rpID: 'localhost', userID: new Uint8Array(Buffer.from('user-id')) }));
+    expect(mocks.generateRegistrationOptions).toHaveBeenCalledWith(expect.objectContaining({ rpID: 'localhost', supportedAlgorithmIDs: [-7], userID: new Uint8Array(Buffer.from('user-id')) }));
   });
   it('requires an existing session token for backup enrollment and binds it to the stored challenge', async () => {
     mocks.getAccount.mockResolvedValue({ id: 'existing-account', webauthn_user_id: Buffer.from('user-id').toString('base64url') });
@@ -35,3 +35,4 @@ describe('PostgreSQL enrollment wiring regression', () => {
     expect(mocks.newChallenge).toHaveBeenCalledWith('existing-account', 'authenticate', 'authentication-challenge');
   });
 });
+

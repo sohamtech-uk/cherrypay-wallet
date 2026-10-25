@@ -6,7 +6,7 @@ export async function beginRegistration(rpID:string,accountID?:string,token?:str
  if(!account)throw Error('Account not found');
  const credentials=await store.getCredentials(account.id);
  if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');
- const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
+ const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',supportedAlgorithmIDs:[-7],authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
  return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
 }
 export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string){
@@ -14,7 +14,7 @@ export async function finishRegistration(accountID:string,requestID:string,respo
   const challenge=await store.consumeLockedChallenge(client,requestID,accountID,token?'register_backup':'register_initial',token);
   const credentials=await store.credentialsLocked(client,accountID);
   if(token?!credentials.length:!!credentials.length)throw Error('Invalid enrollment state');
-  const verified=await verifyRegistrationResponse({response,expectedChallenge:challenge,expectedOrigin:origin,expectedRPID:rpID,requireUserVerification:true});
+  const verified=await verifyRegistrationResponse({response,expectedChallenge:challenge,expectedOrigin:origin,expectedRPID:rpID,requireUserVerification:true,supportedAlgorithmIDs:[-7]});
   if(!verified.verified||!verified.registrationInfo)throw Error('Passkey verification failed');
   const c=verified.registrationInfo.credential;
   await store.addCredentialLocked(client,accountID,{id:c.id,publicKey:c.publicKey,counter:c.counter,transports:response.response.transports});
