@@ -145,7 +145,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     expect(await repository.walletsForOwner(owner.id)).toEqual([]);
     const results=await Promise.all([provisionAccounts(manifest,true,{pool:db,policies}),provisionAccounts(manifest,true,{pool:db,policies})]);
     expect(results.flatMap(r=>r.wallets.map(w=>w.action)).sort()).toEqual(['create','unchanged']);
-    expect(await repository.wallet(approved.walletId,owner.id)).toMatchObject({address:approved.address,policy:'d'.repeat(64),routes:['classic']});
+    expect(await repository.wallet(approved.walletId,owner.id)).toMatchObject({address:approved.address,policy:'d'.repeat(64),routes:['classic','contract']});
     await expect(provisionAccounts(manifest,true,{pool:db,policies:{current:async()=>({fingerprint:'e'.repeat(64),recoveryReady:true})}})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
     const outsider=await createAccount(`${randomUUID()}@example.com`);
     await expect(provisionAccounts({...manifest,accounts:[{...approved,owner:outsider.id}]},true,{pool:db,policies})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
