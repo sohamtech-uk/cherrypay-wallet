@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import App from '../App';
 import { StrKey } from '@stellar/stellar-sdk';
 import { AuroraPayment } from './AuroraPayment';
 import { RecipientIntelligence } from './RecipientIntelligence';
@@ -38,6 +39,13 @@ async function fill() {
   return user;
 }
 describe('cross-chain review and recovery', () => {
+  it('labels the full cross-chain screen and browser title as mainnet, not Testnet', async () => {
+    services(); render(<MemoryRouter initialEntries={['/pay-from-another-chain']}><App paymentAdapter={null}/></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Pay from another chain' });
+    expect(document.title).toBe('Cherry Wallet — Mainnet USDC');
+    expect(screen.queryByLabelText('Stellar Testnet only')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Connect with passkey' })).toBeNull();
+  });
   it('shows exact net output, persists before funding, and reloads status without another quote', async () => {
     const f = services(), view = mount(<AuroraPayment/>), user = await fill();
     expect(screen.getByText('9.8000001 USDC')).toBeTruthy();
