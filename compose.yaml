@@ -9,10 +9,14 @@ services:
       HOST: "0.0.0.0"
       WALLET_ORIGIN: http://localhost:5173
       WEBAUTHN_RP_ID: localhost
+      DATABASE_URL: postgres://wallet:wallet_local_only@db:5432/wallet
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - ./apps/api/src:/app/src:ro
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -38,3 +42,20 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet_local_only
+      POSTGRES_DB: wallet
+    volumes:
+      - wallet_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d wallet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  wallet_pgdata:
