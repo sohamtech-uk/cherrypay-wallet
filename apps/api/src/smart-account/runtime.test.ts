@@ -1,7 +1,7 @@
 import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNT_V080_HASH, PinnedAccountAdapter, type ApprovedAccount } from './pinned-adapter.js';
-import { createPinnedPaymentRuntime, createRuleReaderPaymentRuntime } from './runtime.js';
+import { createPinnedPaymentRuntime, createRuleReaderPaymentRuntime, ruleReaderRuntimeFromEnv, ruleReaderSettingsFromEnv } from './runtime.js';
 import { ContractRulePolicyReader } from './contract-rule-reader.js';
 import { StellarPasskeyCodec } from './passkey-codec.js';
 import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
@@ -70,5 +70,26 @@ describe('createRuleReaderPaymentRuntime', () => {
     const f = ruleFixture();
     await expect(createRuleReaderPaymentRuntime({ ...f.options, selection: { ...selection, verifier: StrKey.encodeContract(Buffer.alloc(32, 7)) } })).rejects.toThrow('VERIFIER_NOT_ALLOWLISTED');
     expect(f.options.repository.wallet).not.toHaveBeenCalled();
+  });
+});
+
+describe('ruleReaderSettingsFromEnv', () => {
+  const base = { PAYMENT_RELAYER_SECRET: 'S-secret', PAYMENT_START_LEDGER: '1200', SMART_ACCOUNT_TRANSFER_RULE_IDS: '0', SMART_ACCOUNT_RECOVERY_RULE_ID: '1' };
+  it('keeps payments disabled without a relayer secret', () => {
+    expect(ruleReaderSettingsFromEnv({})).toBeUndefined();
+  });
+  it('parses rule selection and pins the verifier to the manifest', () => {
+    expect(ruleReaderSettingsFromEnv({ ...base, SMART_ACCOUNT_TRANSFER_RULE_IDS: '0,2' })).toMatchObject({ startLedger: 1200, selection: { transferRuleIds: [0, 2], recoveryRuleId: 1, verifier: SMART_ACCOUNT_KIT.webauthnVerifierAddress } });
+  });
+  it('rejects malformed configuration instead of guessing', () => {
+    expect(() => ruleReaderSettingsFromEnv({ ...base, PAYMENT_START_LEDGER: '' })).toThrow('INVALID_PAYMENT_START_LEDGER');
+    expect(() => ruleReaderSettingsFromEnv({ ...base, SMART_ACCOUNT_TRANSFER_RULE_IDS: '' })).toThrow('SMART_ACCOUNT_TRANSFER_RULE_IDS_REQUIRED');
+    expect(() => ruleReaderSettingsFromEnv({ ...base, SMART_ACCOUNT_TRANSFER_RULE_IDS: '0,x' })).toThrow('INVALID_TRANSFER_RULE_ID');
+    expect(() => ruleReaderSettingsFromEnv({ ...base, SMART_ACCOUNT_RECOVERY_RULE_ID: '-1' })).toThrow('INVALID_RECOVERY_RULE_ID');
+  });
+  it('refuses to start payments with no registered wallets', async () => {
+    const repository = { allWallets: vi.fn(async () => []) } as unknown as PaymentRepository;
+    await expect(ruleReaderRuntimeFromEnv(base, repository)).rejects.toThrow('NO_REGISTERED_TESTNET_WALLETS');
+    expect(await ruleReaderRuntimeFromEnv({}, repository)).toBeUndefined();
   });
 });

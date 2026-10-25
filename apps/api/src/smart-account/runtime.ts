@@ -7,7 +7,7 @@ import { PaymentService } from '../payments/service.js';
 import { StellarChain } from '../payments/stellar.js';
 import { PinnedAccountAdapter, type ApprovedAccount } from './pinned-adapter.js';
 import { verifiedReceiveRoutes } from './receive-route.js';
-import { ContractRulePolicyReader, TestnetContractRuleReader, type RuleSelection } from './contract-rule-reader.js';
+import { ContractRulePolicyReader, TestnetContractRuleReader, type CredentialSource, type RuleSelection } from './contract-rule-reader.js';
 import { StellarPasskeyCodec } from './passkey-codec.js';
 import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
 
@@ -46,7 +46,7 @@ export type RuleReaderAccount = Readonly<{ walletId: string; owner: string; addr
  * Payments, approvals and receive routes share ONE TestnetContractRuleReader, so the
  * fingerprint saved at prepare time is the one StellarPasskeyCodec re-reads at approval.
  * Rule IDs and verifier come from reviewed deployment evidence, never HTTP input.
- * buildApp() still refuses these runtimes until the contract gate is lifted deliberately.
+ * server.ts composes it from the environment via ruleReaderRuntimeFromEnv().
  */
 export async function createRuleReaderPaymentRuntime(options: {
   accounts: readonly RuleReaderAccount[];
@@ -55,6 +55,7 @@ export async function createRuleReaderPaymentRuntime(options: {
   startLedger: number;
   repository?: PaymentRepository;
   server?: rpc.Server;
+  credentials?: CredentialSource;
 }) {
   requireThat(Number.isSafeInteger(options.startLedger) && options.startLedger > 0 && options.startLedger <= 0xffffffff, 'INVALID_MONITOR_START_LEDGER');
   requireThat(Array.isArray(options.accounts) && options.accounts.length > 0, 'APPROVED_ACCOUNTS_REQUIRED');
@@ -63,7 +64,7 @@ export async function createRuleReaderPaymentRuntime(options: {
   const repository = options.repository ?? new PostgresPaymentRepository();
   const server = options.server ?? new rpc.Server(TESTNET_RPC_URL, { timeout: 20 });
   const reader = new TestnetContractRuleReader(options.selection, server);
-  const policyReader = new ContractRulePolicyReader(reader);
+  const policyReader = new ContractRulePolicyReader(reader, new Map(options.accounts.map(a => [a.address, a.owner])), options.credentials);
   for (const account of options.accounts) {
     const wallet = await repository.wallet(account.walletId, account.owner);
     const policy = await policyReader.current(account.address);
@@ -77,4 +78,34 @@ export async function createRuleReaderPaymentRuntime(options: {
     policyReader,
     receiveRoute: verifiedReceiveRoutes(repository, policyReader, server, new Map(options.accounts.map(account => [account.address, deployment]))),
   };
+}
+
+const U32 = /^(0|[1-9]\d{0,9})$/;
+function ruleId(value: string, name: string): number {
+  requireThat(U32.test(value.trim()) && Number(value) <= 0xffffffff, `INVALID_${name}`);
+  return Number(value);
+}
+/** Testnet payment configuration from the server environment (never from HTTP).
+ * Returns undefined when PAYMENT_RELAYER_SECRET is unset: payment endpoints stay 503.
+ * Approved accounts are the wallets registered with scripts/register-testnet-wallet.ts. */
+export function ruleReaderSettingsFromEnv(env: NodeJS.ProcessEnv) {
+  if (!env.PAYMENT_RELAYER_SECRET) return undefined;
+  requireThat(env.PAYMENT_START_LEDGER !== undefined && U32.test(env.PAYMENT_START_LEDGER), 'INVALID_PAYMENT_START_LEDGER');
+  requireThat(!!env.SMART_ACCOUNT_TRANSFER_RULE_IDS, 'SMART_ACCOUNT_TRANSFER_RULE_IDS_REQUIRED');
+  return {
+    relayerSecret: env.PAYMENT_RELAYER_SECRET,
+    startLedger: Number(env.PAYMENT_START_LEDGER),
+    selection: {
+      transferRuleIds: env.SMART_ACCOUNT_TRANSFER_RULE_IDS!.split(',').map(v => ruleId(v, 'TRANSFER_RULE_ID')),
+      recoveryRuleId: env.SMART_ACCOUNT_RECOVERY_RULE_ID ? ruleId(env.SMART_ACCOUNT_RECOVERY_RULE_ID, 'RECOVERY_RULE_ID') : undefined,
+      verifier: SMART_ACCOUNT_KIT.webauthnVerifierAddress,
+    } satisfies RuleSelection,
+  };
+}
+export async function ruleReaderRuntimeFromEnv(env: NodeJS.ProcessEnv, repository: PaymentRepository = new PostgresPaymentRepository()) {
+  const settings = ruleReaderSettingsFromEnv(env);
+  if (!settings) return undefined;
+  const wallets = await repository.allWallets();
+  requireThat(wallets.length > 0, 'NO_REGISTERED_TESTNET_WALLETS');
+  return createRuleReaderPaymentRuntime({ ...settings, repository, accounts: wallets.map(w => ({ walletId: w.id, owner: w.owner, address: w.address })) });
 }

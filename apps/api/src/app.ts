@@ -9,7 +9,6 @@ import {getConfig} from './config.js';
 import {beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
 import {sessionAccount,hashToken,getCredentials,revokeSession} from './store.js';
 export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean } = {}) {
-if (options.payments || options.passkeyCodec || options.receiveRoute) throw new Error('SMART_ACCOUNT_CONTRACT_ADAPTER_NOT_VERIFIED');
 const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
 const token=(h:string|undefined)=>h?.startsWith('Bearer ')?h.slice(7):undefined;
 const attempts=new Map<string,{count:number;reset:number}>();

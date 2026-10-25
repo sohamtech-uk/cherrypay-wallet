@@ -29,6 +29,11 @@ services:
       DB_USER: ${DB_USER:-wallet}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       DB_NAME: ${DB_NAME:-cherrypay_wallet}
+      # Testnet payments stay disabled (HTTP 503) unless PAYMENT_RELAYER_SECRET is set.
+      PAYMENT_RELAYER_SECRET: ${PAYMENT_RELAYER_SECRET:-}
+      PAYMENT_START_LEDGER: ${PAYMENT_START_LEDGER:-}
+      SMART_ACCOUNT_TRANSFER_RULE_IDS: ${SMART_ACCOUNT_TRANSFER_RULE_IDS:-}
+      SMART_ACCOUNT_RECOVERY_RULE_ID: ${SMART_ACCOUNT_RECOVERY_RULE_ID:-}
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
