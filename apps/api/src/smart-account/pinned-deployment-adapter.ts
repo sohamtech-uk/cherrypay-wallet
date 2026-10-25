@@ -10,7 +10,8 @@ export type PinnedDeploymentBuilder = (ownerEmail:string, credentials:readonly {
 /** Uses only the reviewed v0.8.0 WASM and verifier. Never substitutes the blocked legacy WASM. */
 export class PinnedV080DeploymentAdapter implements DeploymentChainAdapter {
   constructor(private readonly builder:PinnedDeploymentBuilder,
-    private readonly server=new rpc.Server(TESTNET_RPC_URL,{timeout:20})) {
+    private readonly server=new rpc.Server(TESTNET_RPC_URL,{timeout:20}),
+    private readonly approvedAccount: (ownerEmail:string,address:string)=>Promise<ApprovedAccount|null> = async()=>null) {
     validateKitV080DeploymentConfig({
       networkPassphrase:TESTNET_PASSPHRASE,accountWasmHash:ACCOUNT_V080_HASH,
       verifierAddress:TESTNET_V080.verifierAddress,verifierWasmHash:TESTNET_V080.verifierWasmHash,
@@ -42,19 +43,9 @@ export class PinnedV080DeploymentAdapter implements DeploymentChainAdapter {
   }
   /** Existing PinnedAccountAdapter validates both independent on-chain rules and pinned WASM. */
   async verifyContractAndSigners(ownerEmail:string,address:string):Promise<boolean>{
-    const {rows}=await db.query<{id:string;owner:string;primary_credential_id:string;backup_credential_id:string;
-      deployment_transaction_hash:string;recovery_transaction_hash:string;wallet_id:string;
-      primary_rule_id:number;backup_rule_id:number}>(`SELECT * FROM wallet_deployment_approvals
-      WHERE owner=$1 AND contract_address=$2`,[ownerEmail,address]);
-    const a=rows[0];
-    if(!a || a.deployment_transaction_hash===a.recovery_transaction_hash)return false;
-    const approved:ApprovedAccount={
-      walletId:a.wallet_id,owner:a.owner,address,accountWasmHash:ACCOUNT_V080_HASH,
-      verifierAddress:TESTNET_V080.verifierAddress,verifierWasmHash:TESTNET_V080.verifierWasmHash,
-      primaryRuleId:a.primary_rule_id,backupRuleId:a.backup_rule_id,
-      primaryCredentialId:a.primary_credential_id,backupCredentialId:a.backup_credential_id,
-      deploymentTransactionHash:a.deployment_transaction_hash,recoveryTransactionHash:a.recovery_transaction_hash,
-    };
+    const approved=await this.approvedAccount(ownerEmail,address);
+    if(!approved || approved.owner!==ownerEmail || approved.address!==address ||
+      approved.deploymentTransactionHash===approved.recoveryTransactionHash)return false;
     const policy=await new PinnedAccountAdapter(this.server,[approved]).current(address);
     return policy.recoveryReady && /^[a-f0-9]{64}$/.test(policy.fingerprint);
   }
