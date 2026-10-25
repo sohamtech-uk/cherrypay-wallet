@@ -2,13 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { StrKey } from '@stellar/stellar-sdk';
 import { AuroraService, IntegrationError, type AuroraInput } from './aurora.js';
 
-export type IntegrationConfig = { auroraEnabled: boolean; auroraApiKey: string };
+export type IntegrationConfig = { auroraEnabled: boolean; auroraApiKey: string; auroraNetwork?: 'TESTNET' | 'MAINNET' };
 export function integrationConfig(env: NodeJS.ProcessEnv = process.env): IntegrationConfig {
-  return { auroraEnabled: env.AURORA_INTENTS_ENABLED === 'true', auroraApiKey: env.AURORA_INTENTS_API_KEY?.trim() ?? '' };
+  return { auroraNetwork: env.AURORA_INTENTS_NETWORK === 'MAINNET' ? 'MAINNET' : 'TESTNET', auroraEnabled: env.AURORA_INTENTS_ENABLED === 'true', auroraApiKey: env.AURORA_INTENTS_API_KEY?.trim() ?? '' };
 }
 export async function registerIntegrationRoutes(app: FastifyInstance, config: IntegrationConfig, fetcher: typeof fetch = fetch) {
   const service = new AuroraService(config.auroraApiKey, fetcher);
-  const enabled = config.auroraEnabled && !!config.auroraApiKey;
+  const network = config.auroraNetwork ?? 'TESTNET';
+  const supported = network === 'MAINNET';
+  const enabled = supported && config.auroraEnabled && !!config.auroraApiKey;
   // Bounded per-process limiter; status reads do not consume the quote budget.
   const limits = new Map<string, { count: number; until: number }>();
   const limited = (ip: string, kind: string, maximum: number) => {
@@ -19,9 +21,10 @@ export async function registerIntegrationRoutes(app: FastifyInstance, config: In
     if (limits.size >= 10_000) return true;
     limits.set(key, { count: 1, until: now + 60_000 }); return false;
   };
-  app.get('/api/v1/aurora/capabilities', async () => ({ enabled, statusAvailable: !!config.auroraApiKey, network: 'MAINNET', route: 'Base USDC → Stellar USDC', maximumUsdc: '100', reason: enabled ? null : 'Aurora funding is not enabled for this deployment.' }));
+  app.get('/api/v1/aurora/capabilities', async () => ({ enabled, statusAvailable: !!config.auroraApiKey, network, supported, route: supported ? 'Base USDC → Stellar USDC' : null, maximumUsdc: '100', reason: !supported ? 'Aurora does not advertise the required Base Sepolia → Stellar Testnet USDC route. Funding is unavailable on Testnet.' : enabled ? null : 'Aurora funding is not enabled for this deployment.' }));
   const text = { type: 'string', minLength: 1, maxLength: 100 };
   app.post<{ Body: AuroraInput }>('/api/v1/aurora/quotes', { schema: { body: { type: 'object', additionalProperties: false, required: ['recipient', 'refundTo', 'amount'], properties: { recipient: text, refundTo: text, amount: { ...text, maxLength: 30 } } } } }, async (req, reply) => {
+    if (!supported) return reply.code(503).send({ code: 'AURORA_TESTNET_UNSUPPORTED', error: 'Aurora funding is unavailable on Stellar Testnet. A mainnet key does not enable a Testnet route.' });
     if (!enabled) return reply.code(503).send({ code: 'AURORA_DISABLED', error: 'Aurora funding is not enabled for this deployment.' });
     if (limited(req.ip, 'quote', 5)) return reply.header('Retry-After', '60').code(429).send({ error: 'Quote limit reached. Wait one minute.' });
     try { return await service.quote(req.body); }

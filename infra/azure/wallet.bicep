@@ -13,6 +13,9 @@ param webImage string
 param databaseUrl string = ''
 @description('Versionless Key Vault URL; runtime identity must have access to this secret only.')
 param databaseSecretUrl string = ''
+@secure()
+@description('Optional server-only Aurora key for read-only recovery. This Testnet template never enables funding.')
+param auroraApiKey string = ''
 @description('Preserved by deploy.sh; do not clear existing certificate bindings on subsequent releases.')
 param customDomains array = []
 
@@ -29,7 +32,7 @@ resource wallet 'Microsoft.App/containerApps@2025-01-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       maxInactiveRevisions: 10
-      secrets: [empty(databaseSecretUrl) ? { name: 'wallet-database-url', value: databaseUrl } : { name: 'wallet-database-url', keyVaultUrl: databaseSecretUrl, identity: registryIdentityId }]
+      secrets: concat([empty(databaseSecretUrl) ? { name: 'wallet-database-url', value: databaseUrl } : { name: 'wallet-database-url', keyVaultUrl: databaseSecretUrl, identity: registryIdentityId }], empty(auroraApiKey) ? [] : [{ name: 'aurora-api-key', value: auroraApiKey }])
       registries: [{ server: registryServer, identity: registryIdentityId }]
       ingress: {
         external: true
@@ -47,7 +50,7 @@ resource wallet 'Microsoft.App/containerApps@2025-01-01' = {
           name: 'api'
           image: apiImage
           resources: { cpu: json('0.5'), memory: '1Gi' }
-          env: [
+          env: concat([
             { name: 'NODE_ENV', value: 'production' }
             { name: 'HOST', value: '0.0.0.0' }
             { name: 'PORT', value: '3001' }
@@ -56,7 +59,9 @@ resource wallet 'Microsoft.App/containerApps@2025-01-01' = {
             { name: 'WALLET_ORIGIN', value: 'https://wallet.cherrymoney.co.uk' }
             { name: 'WEBAUTHN_RP_ID', value: 'wallet.cherrymoney.co.uk' }
             { name: 'WALLET_PAYMENTS_ENABLED', value: 'false' }
-          ]
+            { name: 'AURORA_INTENTS_NETWORK', value: 'TESTNET' }
+            { name: 'AURORA_INTENTS_ENABLED', value: 'false' }
+          ], empty(auroraApiKey) ? [] : [{ name: 'AURORA_INTENTS_API_KEY', secretRef: 'aurora-api-key' }])
           probes: [
             {
               type: 'Startup'

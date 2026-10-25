@@ -2,10 +2,17 @@
 
 ## Scope and reuse
 
-`/pay-from-another-chain` implements the fixed **Base mainnet USDC → Stellar
-mainnet Circle USDC** route. This is separate from the passkey wallet's native
-XLM Testnet payment service and its history/ledger. The screen has an explicit
-mainnet banner; it never pre-fills a Testnet wallet as the recipient.
+The deployment remains **Stellar Testnet only**. `/pay-from-another-chain` reports
+that cross-chain funding is unavailable and exposes no funding form or QR.
+Aurora's advertised **Base mainnet USDC → Stellar mainnet Circle USDC** route
+cannot fund a Testnet wallet. A configured key, even one labelled "sandbox",
+does not create a supported Testnet route.
+
+The implementation supports that fixed mainnet route only behind an explicit
+network setting, enable flag and server key. It is separate from the passkey
+wallet's native XLM Testnet service and history/ledger. If separately approved
+in future, a mainnet deployment displays a mainnet banner and never pre-fills a
+Testnet wallet as the recipient. The Azure Testnet template cannot enable it.
 
 Adapted from [Monad-Metropolis at 10d7bd3](https://github.com/sohamtech-uk/Monad-Metropolis/tree/10d7bd3052200550937704b3d19d8c5deaa02009):
 
@@ -38,7 +45,7 @@ Base USDC has 6 decimals; Stellar USDC has 7. Amounts remain integer strings and
    trustline are rejected. Horizon verifies the account and receive capacity.
    The UI additionally asks the user to confirm no memo is required; not every
    exchange advertises this on-chain.
-2. The server checks Aurora's live token catalog and creates an unfunded
+2. The server checks Aurora's live token catalog (`{asset_stats, tokens}`) and creates an unfunded
    `EXACT_INPUT` quote. Creating a quote is not a transfer. The server key never
    leaves the API. The fixed provider URL cannot be overridden by request data.
 3. The review binds the exact recipient, refund wallet, input, expected output,
@@ -99,7 +106,7 @@ URL, private key, token contract, arbitrary chain or arbitrary execution recipe.
 
 | Method and route | Request | Result |
 | --- | --- | --- |
-| `GET /api/v1/aurora/capabilities` | None | `enabled`, `statusAvailable`, `network: MAINNET`, fixed route and cap |
+| `GET /api/v1/aurora/capabilities` | None | `enabled`, `statusAvailable`, `network`, `supported`, route (null on Testnet), reason and cap |
 | `POST /api/v1/aurora/quotes` | `{recipient, refundTo, amount}`; decimal input string | Bound mainnet quote with integer-string `amountIn`, `amountOut`, `minAmountOut`, deposit, expiry and optional fee amounts |
 | `GET /api/v1/aurora/status` | `depositAddress` query | Bound quote, provider status, checked time, validated source/destination hashes, optional actual output |
 | `GET /api/v1/intelligence/recipient` | `address`, `network: MAINNET or TESTNET` | Request-bound unsupported coverage result, `providerCalled: false` |
@@ -112,9 +119,10 @@ API key is a URL path segment). Unknown statuses remain uncertain.
 
 ## Enablement and verification
 
-The default deployment has funding **disabled**, with no new keys or fees set.
+The default deployment has funding **disabled** on Testnet.
 
 ```dotenv
+AURORA_INTENTS_NETWORK=TESTNET
 AURORA_INTENTS_ENABLED=false
 # AURORA_INTENTS_API_KEY=<Aurora Studio Swap API key, server only>
 ```
@@ -123,14 +131,24 @@ Obtain a Swap API key from [Aurora Studio](https://studio.aurora.dev/) with revi
 fees. It is not automatically interchangeable with the existing Monad Intents
 Connect proxy credential. Set it on the **API** container using an Azure secret
 or Key Vault reference, not a `VITE_` variable, web image, GitHub source or browser
-storage. Only set `AURORA_INTENTS_ENABLED=true` after reviewing the configured
-fees and the mainnet pilot. Both values are required to request new quotes.
-With the key present and the enable flag false, status recovery remains enabled.
+storage. New quotes require all three: `AURORA_INTENTS_NETWORK=MAINNET`,
+`AURORA_INTENTS_ENABLED=true` and a key. That is outside the current Testnet scope.
+Testnet requests return `AURORA_TESTNET_UNSUPPORTED` without contacting Aurora,
+including when a key and enable flag are present. With a key present, read-only
+status recovery remains available; loading an old reviewed mainnet record on
+Testnet never exposes deposit controls.
 
-Compose passes these environment variables to the API. The Azure bootstrap
-template intentionally does not activate integrations; its deployment replaces
-the template and must not be used to remove the key while swaps are outstanding.
-Preserve the key/reference and availability of status recovery across releases.
+Compose passes these environment variables to the API. The Azure template stores
+an optional key as a secret referenced only by the API and fixes the network to
+Testnet with funding disabled. The release script refuses to remove an existing
+key or overwrite an activated Aurora runtime. Supply the same key through the
+deployment secret manager on subsequent releases.
+
+The supplied Studio key was verified with a read-only token-catalog request.
+It returned HTTP 200 and the expected mainnet Base and Stellar USDC tokens. The
+portal showed an active key with 0 bps application fee; provider routing,
+withdrawal, refund and source gas costs are separate. No quote or funding was
+performed. This check does not establish Testnet support.
 
 Automated validation uses mocked Aurora/Horizon responses and covers route
 changes, decimals, memo requirements, trustline eligibility, recipient/refund

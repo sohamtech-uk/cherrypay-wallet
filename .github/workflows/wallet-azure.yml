@@ -57,4 +57,5 @@ jobs:
           AZURE_CONTAINER_REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
           WALLET_DATABASE_URL: ${{ secrets.WALLET_DATABASE_URL }}
           WALLET_DATABASE_SECRET_URL: ${{ vars.WALLET_DATABASE_SECRET_URL }}
+          AURORA_INTENTS_API_KEY: ${{ secrets.AURORA_INTENTS_API_KEY }}
         run: bash infra/azure/deploy.sh

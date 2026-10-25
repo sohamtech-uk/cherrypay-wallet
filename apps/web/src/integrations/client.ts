@@ -11,7 +11,7 @@ export type AuroraQuote = {
   depositAddress: string; expiresAt: string; slippageBps: 100; refundFee: string | null; withdrawFee: string | null;
 };
 export type SwapStatus = { quote: AuroraQuote; status: 'PENDING_DEPOSIT' | 'INCOMPLETE_DEPOSIT' | 'PROCESSING' | 'SUCCESS' | 'REFUNDED' | 'FAILED' | 'UNKNOWN'; checkedAt: string; originTxHashes: string[]; destinationTxHashes: string[]; amountOut: string | null };
-export type Capabilities = { enabled: boolean; statusAvailable: boolean; network: 'MAINNET' };
+export type Capabilities = { enabled: boolean; statusAvailable: boolean; network: 'MAINNET' | 'TESTNET' };
 export type RecipientIntelligence = { provider: 'Nansen'; chain: 'stellar'; address: string; network: 'MAINNET' | 'TESTNET'; status: 'unsupported'; providerCalled: false; coverageVerifiedAt: string; message: string; notice: string };
 export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Unexpected service response. Check the existing payment before funding.');
@@ -62,7 +62,7 @@ export async function request(path: string, body?: unknown, signal?: AbortSignal
 export const auroraClient = {
   async capabilities(signal?: AbortSignal): Promise<Capabilities> {
     const r = object(await request('aurora/capabilities', undefined, signal));
-    if (typeof r.enabled !== 'boolean' || typeof r.statusAvailable !== 'boolean' || r.network !== 'MAINNET') throw Error('Unable to verify Aurora availability.');
+    if (typeof r.enabled !== 'boolean' || typeof r.statusAvailable !== 'boolean' || !['MAINNET', 'TESTNET'].includes(String(r.network)) || (r.network === 'TESTNET' && r.enabled)) throw Error('Unable to verify Aurora availability.');
     return r as unknown as Capabilities;
   },
   async quote(input: AuroraInput): Promise<AuroraQuote> {

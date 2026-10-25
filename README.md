@@ -11,4 +11,6 @@ Customer-controlled, **Stellar Testnet-only** XLM smart-wallet MVP. Contains pas
 
 The application uses its own **PostgreSQL 17** database and versioned SQL migrations. Stellar Wallet Backend is a *separate optional indexer* with its own PostgreSQL/TimescaleDB storage; do not merge vendor indexer schemas into the Cherry Pay database.
 
+**Indexing target:** this repository uses Stellar SDK/RPC event reads and persistent PostgreSQL history/cursors. Envio currently supports EVM, SVM and Fuel, not Stellar/Soroban ([supported platforms](https://docs.envio.dev/docs/HyperIndex/overview)). The separate `Monad-Metropolis` Envio deployment is not this wallet's indexer. Connecting this repository to Envio does not provide Stellar Testnet support; no Envio deployment is required for this application.
+
 Never commit secrets, expose production signing keys to AI agents, or use mainnet funds. No real wallet payment is enabled until contract/policy/recovery security gates pass.
