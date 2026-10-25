@@ -143,7 +143,7 @@ def main():
         for component in ["api","web"]:
             print("Building production "+component+" image",flush=True)
             tag="cherrypay-wallet-"+component+":"+sha
-            az("acr","build","-r",resources["registryId"][4],"-t",tag,"-f","Dockerfile.production",str(ROOT/"apps"/component),"--no-logs")
+            az("acr","build","-r",resources["registryId"][4],"-t",tag,"-f",str(ROOT/"apps"/component/"Dockerfile.production"),str(ROOT/"apps"/component),"--no-logs")
             digest=az("acr","repository","show","-n",resources["registryId"][4],"--image",tag,"--query","digest")
             if not re.fullmatch(r"sha256:[0-9a-f]{64}",digest): raise ValueError("Registry digest is invalid")
             images[component]=registry["loginServer"]+"/cherrypay-wallet-"+component+"@"+digest
