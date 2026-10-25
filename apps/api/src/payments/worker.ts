@@ -1,11 +1,16 @@
 import type { PaymentService } from './service.js';
-/** No overlapping ticks; database leases also fence separate worker processes. */
+/** No overlapping ticks; shutdown drains the active tick before closing persistence. */
 export function startPaymentWorker(service: PaymentService, onError: (code: string) => void, intervalMs = 5000) {
-  let stopped = false; let timer: ReturnType<typeof setTimeout>;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let active: Promise<void>;
   async function tick() {
     try { await service.tick(); } catch { onError('PAYMENT_MONITOR_RETRY_REQUIRED'); }
-    if (!stopped) { timer = setTimeout(tick, intervalMs); timer.unref(); }
+    if (!stopped) {
+      timer = setTimeout(() => { active = tick(); }, intervalMs);
+      timer.unref();
+    }
   }
-  void tick();
-  return () => { stopped = true; clearTimeout(timer); };
+  active = tick();
+  return async () => { stopped = true; clearTimeout(timer); await active; };
 }
