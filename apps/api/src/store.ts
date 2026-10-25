@@ -19,6 +19,25 @@ export async function createAccount() {
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[id,userID]);
   return {id,webauthn_user_id:userID};
 }
+/** Emails are lookup identifiers; account UUIDs remain permanent ownership keys. */
+export function normalizeEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (email.length > 254 || !/^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/.test(email)) throw Error('INVALID_EMAIL');
+  return email;
+}
+export async function getAccountByEmail(value: string) {
+  const email = normalizeEmail(value);
+  const { rows } = await pool.query<{id:string;webauthn_user_id:string}>(
+    'SELECT id,webauthn_user_id FROM wallet_accounts WHERE email=$1 AND email_verified_at IS NOT NULL', [email]);
+  return rows[0];
+}
+export async function claimEmail(accountID: string, value: string) {
+  const email = normalizeEmail(value);
+  const result = await pool.query(
+    'UPDATE wallet_accounts SET email=$1,email_verified_at=NULL WHERE id=$2 AND email IS NULL RETURNING id',
+    [email, accountID]);
+  if (result.rowCount !== 1) throw Error('EMAIL_ALREADY_ASSIGNED');
+}
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
   if(!token || !/^[a-zA-Z0-9_-]{40,100}$/.test(token)) return null;
   const {rows} = await pool.query<{account_id:string}>('SELECT account_id FROM wallet_sessions WHERE token_hash=$1 AND expires_at>NOW()',[hashToken(token)]);
