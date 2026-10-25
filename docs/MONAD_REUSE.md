@@ -41,6 +41,10 @@ accounting changes were copied or activated.
 
 ## Stellar references used
 
+See [the ecosystem guide](STELLAR_ECOSYSTEM_GUIDE.md) for the current skill routing,
+Stellar Testnet indexing candidates, separate CCTP route and verified distinction
+between native Chainlink Data Feeds support and reuse of a Monad CRE workflow.
+
 - [Stellar dApp skill](https://github.com/stellar/stellar-dev-skill/blob/e20f3529421830ee57fdbf9974e334816b05fe84/skills/dapp/SKILL.md)
   and its smart-account companion: verify SDK/contract compatibility and keep
   authorization tied to the selected account model.

@@ -2,6 +2,11 @@
 
 Upstream: https://github.com/stellar/wallet-backend
 
+For the current RPC/PostgreSQL boundary and other Stellar-compatible indexing
+options, see [the ecosystem guide](STELLAR_ECOSYSTEM_GUIDE.md). Goldsky Turbo's
+documented Testnet support is an evaluation option; neither it nor Wallet Backend
+has been activated by that review.
+
 As of 25 October 2026, the project's `main` branch describes a wallet GraphQL indexer with PostgreSQL 17 + TimescaleDB 2.28+ and Stellar RPC 28/29. **The releases API showed no published releases at the time of review**, and the README warns that `main` may describe unreleased functionality. Do not treat the example `v1.0.0` tag in upstream docs as a release until GitHub actually publishes it.
 
 ## Local evaluation (independent from Cherry Pay Compose)
