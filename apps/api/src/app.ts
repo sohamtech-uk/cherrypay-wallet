@@ -1,4 +1,5 @@
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
+import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
 import type { PaymentDependencies } from './payments/routes.js';
 import type { PaymentService } from './payments/service.js';
@@ -8,28 +9,40 @@ import Fastify from 'fastify';
 import {getConfig} from './config.js';
 import {beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
 import {sessionAccount,hashToken,getCredentials,revokeSession,db} from './store.js';
-export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
-const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,trustProxy:'loopback',bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
+export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; deployments?: AutomaticDeploymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
+const config=getConfigForApp(),app=Fastify({logger:options.logger??true,trustProxy:'loopback',bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
+function getConfigForApp() { return options.config??getConfig(); }
 const token=(h:string|undefined)=>h?.startsWith('Bearer ')?h.slice(7):undefined;
 const attempts=new Map<string,{count:number;reset:number}>();
 function limited(ip:string,route:string){const key=ip+':'+route,now=Date.now(),old=attempts.get(key);if(!old||old.reset<=now){attempts.set(key,{count:1,reset:now+60_000});return false;}old.count++;return old.count>10;}
 
 app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==config.origin)return reply.code(403).send({error:'Untrusted origin'});if(req.method==='POST'&&req.url.startsWith('/api/v1/passkeys/')&&limited(req.ip,req.url))return reply.code(429).send({error:'Too many attempts'});});
-app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:false}));
+app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments}));
 app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
-app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:false}));
+app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:!!options.deployments}));
 app.post('/api/v1/passkeys/registration/options',async(req,reply)=>{try{const id=(req.body as {accountID?:string}|undefined)?.accountID,t=token(req.headers.authorization);if(id&&await sessionAccount(t)!==id)return reply.code(403).send({error:'Authentication required'});return await beginRegistration(config.rpID,id,id?t:undefined);}catch{return reply.code(400).send({error:'Cannot start enrollment'});}});
-app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});const verified=await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);try { await db.query(`INSERT INTO wallet_deployment_jobs(account_id,status) VALUES($1,$2)
-ON CONFLICT (account_id) DO UPDATE SET status=CASE
- WHEN wallet_deployment_jobs.status IN ('PENDING','AWAITING_PASSKEY') THEN EXCLUDED.status
- ELSE wallet_deployment_jobs.status END, updated_at=NOW()`,
-[accountID,verified.credentialCount>=2?'PENDING':'AWAITING_PASSKEY']); } catch (error) { app.log.error({ error, accountID }, 'Deployment reservation failed after verified passkey enrollment; registration remains successful'); } return verified;}catch{return reply.code(400).send({error:'Cannot verify enrollment'});}});
+app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{
+  try {
+    const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);
+    if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});
+    const verified=await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);
+    try {
+      if (options.deployments) await options.deployments.queue(verified.accountID);
+      else await db.query(`INSERT INTO wallet_deployment_jobs(account_id,status) VALUES($1,$2)
+        ON CONFLICT (account_id) DO UPDATE SET status=CASE
+        WHEN wallet_deployment_jobs.status IN ('PENDING','AWAITING_PASSKEY') THEN EXCLUDED.status
+        ELSE wallet_deployment_jobs.status END,updated_at=NOW()`,
+        [accountID,verified.credentialCount>=2?'PENDING':'AWAITING_PASSKEY']);
+    } catch { app.log.warn({code:'DEPLOYMENT_RESERVATION_UNAVAILABLE'},'Verified registration succeeded; deployment reservation can be retried'); }
+    return verified;
+  } catch {return reply.code(400).send({error:'Cannot verify enrollment'});}
+});
 app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{return await beginAuthentication((req.body as {accountID:string}).accountID,config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
 app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
-app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:false};});
+app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:!!options.deployments};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
-await registerSmartAccountRoutes(app);
-// Only trusted startup code may supply a runtime after the B1/B2 contract gate.
+await registerSmartAccountRoutes(app,{deployments:options.deployments,origin:config.origin});
+// Deployment alone never supplies a spending runtime or bypasses independent recovery.
 await registerPaymentRoutes(app, options.payments ? {
   service: options.payments,
   receiveRoute: options.receiveRoute,
@@ -42,11 +55,13 @@ await registerPaymentRoutes(app, options.payments ? {
 } : undefined);
 if (options.payments) {
   let stop: (() => Promise<void>) | undefined;
-  app.addHook('onReady', async () => {
-    stop = startPaymentWorker(options.payments!, code => app.log.warn({ code }, 'Payment monitor will retry'));
-  });
+  app.addHook('onReady', async () => { stop = startPaymentWorker(options.payments!, code => app.log.warn({ code }, 'Payment monitor will retry')); });
+  app.addHook('onClose', async () => { await stop?.(); });
+}
+if (options.deployments) {
+  let stop: (() => Promise<void>) | undefined;
+  app.addHook('onReady', async () => { stop = options.deployments!.start(code => app.log.warn({code},'Deployment worker will retry')); });
   app.addHook('onClose', async () => { await stop?.(); });
 }
 return app;
 }
-
