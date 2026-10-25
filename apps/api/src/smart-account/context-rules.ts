@@ -116,3 +116,14 @@ export async function readHydratedContextRule(read: RawContractRead, spec: RuleS
     ledgers,
   };
 }
+
+/** Retry a complete read when its observations span more than one ledger. Only the
+ * snapshot-inconsistency error is retried; every other failure is returned immediately. */
+export async function withConsistentSnapshot<T>(read: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try { return await read(); }
+    catch (error) {
+      if (!(error instanceof Error && error.message === 'INCONSISTENT_POLICY_SNAPSHOT') || attempt >= attempts) throw error;
+    }
+  }
+}
