@@ -51,6 +51,7 @@ services:
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
     environment:
       NODE_ENV: development
+      WALLET_API_PROXY_TARGET: http://api:3001
     ports:
       - "127.0.0.1:${WALLET_WEB_PORT:-5174}:5173"
     volumes:
@@ -64,3 +65,4 @@ services:
 
 volumes:
   wallet_postgres:
+

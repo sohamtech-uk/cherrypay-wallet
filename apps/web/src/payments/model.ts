@@ -27,7 +27,7 @@ export function destinationError(value: string, supported: RouteKind[]): string 
 export type Intent = { network: typeof NETWORK; from: string; destination: string; amountStroops: string };
 export type Quote = Intent & { id: string; feeStroops: string; feePayer: 'wallet' | 'sponsor'; spendableStroops: string; expiresAt: string };
 export type AttemptStatus = 'awaiting_approval' | 'submitted' | 'pending' | 'unknown' | 'confirmed' | 'failed' | 'rejected';
-export type Attempt = Intent & { id: string; status: AttemptStatus; createdAt: string; feeStroops: string; transactionHash?: string; verified: boolean; failureMessage?: string };
+export type Attempt = Intent & { id: string; status: AttemptStatus; createdAt: string; feeStroops: string; feeKnown?: boolean; transactionHash?: string; verified: boolean; failureMessage?: string };
 export function checkQuote(quote: Quote, intent: Intent): void {
   if (!quote.id || quote.network !== NETWORK || quote.from !== intent.from || quote.destination !== intent.destination || quote.amountStroops !== intent.amountStroops) throw new Error('The fee preview does not match this payment. Request a new preview.');
   if (!Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) throw new Error('Fee preview expired. Request a new preview.');
@@ -49,12 +49,19 @@ export interface PaymentAdapter {
   address: string;
   supportedDestinations: RouteKind[];
   receive?: { address: string; route: RouteKind; instructions: string };
-  prepare(intent: Intent): Promise<Quote>;
+  canSign?: boolean;
+  persistentPreview?: boolean;
+  getBalance?(): Promise<{ amountStroops: string; ledger: number; updatedAt: number } | null>;
+  getQuote?(id: string): Promise<Quote>;
+  cancelAttempt?(id: string): Promise<Attempt>;
+  listTransfers?(cursor?: string): Promise<{ items: Attempt[]; nextCursor?: string }>;
+  prepare(intent: Intent, idempotencyKey?: string): Promise<Quote>;
   // Persist the attempt BEFORE requesting approval. Reusing the key MUST return the same attempt.
   createAttempt(quote: Quote, idempotencyKey: string): Promise<Attempt>;
   // Authorize the exact persisted intent, enforce quote expiry and submit at most once.
-  approve(attemptId: string): Promise<Attempt>;
+  approve(attemptId: string, reviewed?: Quote): Promise<Attempt>;
   getAttempt(id: string): Promise<Attempt>;
   getAttemptByKey(key: string): Promise<Attempt | null>;
   listAttempts(cursor?: string): Promise<{ items: Attempt[]; nextCursor?: string }>;
 }
+
