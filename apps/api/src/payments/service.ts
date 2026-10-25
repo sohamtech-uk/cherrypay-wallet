@@ -28,8 +28,8 @@ export class PaymentService {
     // or rotation must not hide a previous submission or invite a replacement key.
     const prior = await this.store.byKey(walletId, key);
     if (prior) { requireThat(prior.requestDigest === digest(intent), 'IDEMPOTENCY_CONFLICT'); return prior; }
-    await this.policy(wallet);
     await this.recipient(wallet, intent);
+    await this.policy(wallet);
     const a = await this.store.create(wallet, intent, key);
     try { return await this.prepare(a.id); }
     catch (error) { if (error instanceof PaymentError && error.code === 'ATTEMPT_BUSY_OR_INVALID_STATE') return this.store.get(a.id); throw error; }
