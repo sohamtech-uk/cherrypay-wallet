@@ -1,5 +1,5 @@
 import { startAuthentication } from '@simplewebauthn/browser';
-import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind } from './model';
+import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput } from './model';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string) {
@@ -131,6 +131,41 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       });
       return { items, nextCursor: cursor(data.nextCursor) };
     },
+  };
+  const runReference = (value: unknown) => { const s = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(s)) throw Error('Invalid pay run reference.'); return s; };
+  const parseRun = (value: unknown): PayRun => {
+    const r = object(value);
+    if (r.walletId !== walletId || r.network !== NETWORK || !Array.isArray(r.items) || r.items.length < 1 || r.items.length > 50 || !['draft','in_progress','completed'].includes(text(r.status))) throw Error('Pay run wallet or network mismatch.');
+    const items = r.items.map(value => {
+      const row = object(value), destination = text(row.destination), amountStroops = integer(row.amountStroops);
+      if (!addressKind(destination) || destination === address || BigInt(amountStroops) <= 0n) throw Error('Invalid pay run recipient or amount.');
+      const attempt = row.attempt === null ? null : parse(row.attempt);
+      if (attempt && (attempt.destination !== destination || attempt.amountStroops !== amountStroops || object(row.attempt).maxFeeStroops !== r.maxFeeStroops)) throw Error('Pay run payment mismatch.');
+      return { reference: runReference(row.reference), destination, amountStroops, attempt };
+    });
+    const confirmed = items.filter(i => i.attempt?.status === 'confirmed' && i.attempt.verified).length;
+    const totalStroops = integer(r.totalStroops), maxFeeStroops = integer(r.maxFeeStroops);
+    const status = confirmed === items.length ? 'completed' : items.some(i => i.attempt) ? 'in_progress' : 'draft';
+    if (new Set(items.map(i => i.reference)).size !== items.length || new Set(items.map(i => i.destination)).size !== items.length || items.reduce((n,i) => n + BigInt(i.amountStroops),0n).toString() !== totalStroops || confirmed !== r.confirmedCount || r.status !== status || BigInt(maxFeeStroops) <= 0n || BigInt(maxFeeStroops) > 10000000n) throw Error('Pay run totals or status mismatch.');
+    return { id: text(r.id), reference: runReference(r.reference), network: NETWORK, items, maxFeeStroops, totalStroops, confirmedCount: confirmed, status };
+  };
+  adapter.payroll = {
+    async create(input: PayRunInput) {
+      const run = parseRun(await api(`${base}/payroll`, input));
+      if (run.reference !== input.reference || run.maxFeeStroops !== input.maxFeeStroops || JSON.stringify(run.items.map(({ reference,destination,amountStroops }) => [reference,destination,amountStroops])) !== JSON.stringify(input.items.map(i => [i.reference,i.destination,i.amountStroops]))) throw Error('Saved pay run differs from your request. Refresh existing runs.');
+      return run;
+    },
+    async get(id) { const run = parseRun(await api(`${base}/payroll/${encodeURIComponent(id)}`)); if (run.id !== id) throw Error('Pay run identity mismatch.'); return run; },
+    async list(next) {
+      const data = object(await api(`${base}/payroll${next ? `?cursor=${encodeURIComponent(next)}` : ''}`));
+      if (data.network !== NETWORK || !Array.isArray(data.items) || data.items.length > 20) throw Error('Invalid pay run list.');
+      return { items: data.items.map(value => {
+        const row = object(value);
+        if (!Number.isSafeInteger(row.createdAt) || !Number.isSafeInteger(row.recipientCount) || Number(row.recipientCount) < 1 || Number(row.recipientCount) > 50) throw Error('Invalid pay run summary.');
+        return { id: text(row.id), reference: runReference(row.reference), createdAt: Number(row.createdAt), recipientCount: Number(row.recipientCount) };
+      }), nextCursor: cursor(data.nextCursor) };
+    },
+    async prepare(runId, reference) { return parse(await api(`${base}/payroll/${encodeURIComponent(runId)}/lines/${encodeURIComponent(reference)}/prepare`, {})); },
   };
   // Outbound destination policy is NOT proof of a supported receive route.
   if (wallet.receive !== undefined) {

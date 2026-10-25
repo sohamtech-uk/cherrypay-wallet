@@ -106,3 +106,14 @@ it('refuses a mutated begin-approval response before opening the authenticator',
   const authenticate=vi.fn();const adapter=await connectPaymentAdapter(api,wallet.id,undefined,authenticate);
   const q=await adapter.prepare(intent,'saved-key');await expect(adapter.approve(q.id,q)).rejects.toThrow('differs');expect(authenticate).not.toHaveBeenCalled();
 });
+
+it('validates payroll wallet, line binding, exact totals and confirmed status', async () => {
+  const {api,signer} = fixture(); const adapter = await connectPaymentAdapter(api,wallet.id,signer);
+  const run = {id:'run-1',walletId:wallet.id,network:'TESTNET',reference:'october',maxFeeStroops:'123',totalStroops:'10000001',confirmedCount:0,status:'draft',items:[{reference:'employee-1',destination,amountStroops:'10000001',attempt:null}]};
+  api.mockResolvedValue(run);
+  expect((await adapter.payroll!.get('run-1')).totalStroops).toBe('10000001');
+  for (const changed of [{...run,walletId:'other'},{...run,totalStroops:'10000002'},{...run,status:'completed'},{...run,items:[{...run.items[0],attempt:attempt({maxFeeStroops:'123',destination:address})}]}]) {
+    api.mockResolvedValue(changed); await expect(adapter.payroll!.get('run-1')).rejects.toThrow();
+  }
+  expect(signer).not.toHaveBeenCalled();
+});

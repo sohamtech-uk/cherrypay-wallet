@@ -1,3 +1,4 @@
+import { verifyAccountAcceptance } from './acceptance.js';
 import { Keypair, rpc } from '@stellar/stellar-sdk';
 import { TESTNET_RPC_URL } from '../config.js';
 import { requireThat } from '../payments/model.js';
@@ -28,6 +29,7 @@ export async function createPinnedPaymentRuntime(options: {
   for (const account of options.accounts) {
     const wallet = await repository.wallet(account.walletId, account.owner);
     const policy = await codec.current(account.address);
+    await verifyAccountAcceptance(account, server);
     requireThat(wallet.address === account.address && wallet.policy === policy.fingerprint && policy.recoveryReady, 'APPROVED_WALLET_BINDING_MISMATCH');
     requireThat(JSON.stringify(wallet.routes) === JSON.stringify(['classic','contract']), 'C_TO_C_ROUTE_POLICY_NOT_ENABLED');
   }

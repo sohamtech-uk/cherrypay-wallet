@@ -38,3 +38,9 @@
 .integration-screen a { overflow-wrap: anywhere; }
 .integration-screen .mono { overflow-wrap: anywhere; }
 .integration-screen dd { font-variant-numeric: tabular-nums; }
+
+.payroll-table { overflow-x: auto; margin: 1rem 0; }
+.payroll-table table { width: 100%; border-collapse: collapse; }
+.payroll-table th, .payroll-table td { padding: .75rem; text-align: left; border-bottom: 1px solid #cbd5e1; vertical-align: top; }
+.payroll-address { display: block; max-width: 22rem; overflow-wrap: anywhere; }
+.payment-screen textarea { display: block; width: 100%; box-sizing: border-box; padding: .75rem; font: inherit; }

@@ -1,3 +1,4 @@
+import { payRunSchema } from '../payroll/routes.js';
 import { paymentSchemas } from './routes.js';
 const string = { type: 'string' };
 const stroops = { type: 'string', pattern: '^[0-9]+$' };
@@ -27,6 +28,12 @@ const base = '/api/v1/wallets/{walletId}';
 export const paymentOpenApi = {
   openapi: '3.1.0', info: { title: 'Cherry Pay Wallet Testnet Payment API', version: '0.1.0', description: 'B3–B7 backend contract. Default server is disabled until verified B1/B2 session, contract and recovery adapters are composed. The P0 authentication adapter supplies a verified bearer session. No session is issued by this module.' },
   components: { securitySchemes: { WalletSession: { type: 'http', scheme: 'bearer', description: 'Verified owner session supplied by the B1/B2 authentication adapter; never an account ID.' } }, schemas: {
+    PayRunInput: payRunSchema,
+    PayRun: { type: 'object', required: ['id','walletId','network','reference','createdAt','maxFeeStroops','totalStroops','confirmedCount','status','items'], properties: {
+      id: string, walletId: string, network: { const: 'TESTNET' }, reference: string, createdAt: {type:'integer'}, maxFeeStroops: stroops, totalStroops: stroops, confirmedCount: {type:'integer'}, status: {enum:['draft','in_progress','completed']},
+      items: {type:'array',minItems:1,maxItems:50,items:{type:'object',required:['reference','destination','amountStroops','attempt'],properties:{reference:string,destination:string,amountStroops:stroops,attempt:{oneOf:[ref('Attempt'),{type:'null'}]}}}}
+    } },
+    PayRunPage: {type:'object',required:['network','items'],properties:{network:{const:'TESTNET'},nextCursor:string,items:{type:'array',maxItems:20,items:{type:'object',required:['id','reference','createdAt','recipientCount'],properties:{id:string,reference:string,createdAt:{type:'integer'},recipientCount:{type:'integer'}}}}}},
     Intent: paymentSchemas.intent, Approval: paymentSchemas.approval, PasskeyAssertion: paymentSchemas.assertion, Attempt: attempt, Error: { type: 'object', required: ['error'], properties: { error: string } },
     Wallet: { type: 'object', required: ['id', 'address', 'network', 'supportedDestinations'], properties: { id: string, address: string, network: { const: 'TESTNET' }, approvalMode: { enum: ['webauthn','external'] }, receive: { type: 'object', required: ['address','route','instructions'], properties: { address: string, route: { const: 'contract' }, instructions: string } }, supportedDestinations: { type: 'array', items: { enum: ['classic', 'contract'] } } } },
     OwnedWallets: {type:'object',required:['network','items'],properties:{network:{const:'TESTNET'},items:{type:'array',maxItems:100,items:{type:'object',required:['id','address','network'],properties:{id:string,address:string,network:{const:'TESTNET'}}}}}},
@@ -36,6 +43,9 @@ export const paymentOpenApi = {
     Balance: { type: 'object', required: ['network', 'address', 'snapshot'], properties: { network: { const: 'TESTNET' }, address: string, snapshot: { oneOf: [{ type: 'null' }, { type: 'object', required: ['amountStroops', 'ledger', 'updatedAt'], properties: { amountStroops: stroops, ledger: { type: 'integer' }, updatedAt: { type: 'integer', description: 'Unix milliseconds. Clients must display snapshot age.' } } }] } } },
   } },
   paths: {
+    [`${base}/payroll`]: { parameters:[walletParameter], get:operation('List saved Testnet pay runs',ref('PayRunPage'),undefined,[cursorParameter]), post:operation('Save or recover immutable pay run by reference',ref('PayRun'),ref('PayRunInput')) },
+    [`${base}/payroll/{runId}`]: { parameters:[walletParameter,{name:'runId',in:'path',required:true,schema:string}], get:operation('Read pay run and existing line outcomes without submitting',ref('PayRun')) },
+    [`${base}/payroll/{runId}/lines/{lineReference}/prepare`]: { parameters:[walletParameter,{name:'runId',in:'path',required:true,schema:string},{name:'lineReference',in:'path',required:true,schema:string}], post:operation('Create or recover one payroll payment for separate passkey approval',ref('Attempt'),{type:'object',additionalProperties:false}) },
     '/api/v1/wallets': {get:operation('Discover wallets belonging to the authenticated session',ref('OwnedWallets'))},
     [base]: { parameters: [walletParameter], get: operation('Read owned wallet', ref('Wallet')) },
     [`${base}/attempts`]: { parameters: [walletParameter], get: operation('List payment attempts', ref('AttemptPage'), undefined, [cursorParameter]), post: operation('Create or recover idempotent payment attempt', ref('Attempt'), ref('Intent'), [{ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', pattern: '^[a-zA-Z0-9_-]{16,128}$' } }]) },

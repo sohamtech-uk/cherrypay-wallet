@@ -1,3 +1,4 @@
+import { registerPayrollRoutes } from './payroll/routes.js';
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import { registerIntegrationRoutes } from './integrations/routes.js';
 import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
@@ -28,7 +29,7 @@ app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.a
 await registerSmartAccountRoutes(app);
 await registerIntegrationRoutes(app, config.integrations);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
-await registerPaymentRoutes(app, options.payments ? {
+const paymentDependencies: PaymentDependencies | undefined = options.payments ? {
   service: options.payments,
   receiveRoute: options.receiveRoute,
   approvals: options.passkeyCodec ? new PasskeyApprovalService(options.payments, new PostgresApprovalTickets(), options.passkeyCodec, postgresAssertionVerifier(config.rpID, config.origin), config.rpID) : undefined,
@@ -37,7 +38,9 @@ await registerPaymentRoutes(app, options.payments ? {
     const subject = await sessionAccount(token(request.headers.authorization));
     return subject ? { subject, sessionHash: hashToken(token(request.headers.authorization)!) } : null;
   },
-} : undefined);
+} : undefined;
+await registerPaymentRoutes(app, paymentDependencies);
+await registerPayrollRoutes(app, paymentDependencies);
 if (options.payments) {
   let stop: (() => Promise<void>) | undefined;
   app.addHook('onReady', async () => {
