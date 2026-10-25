@@ -24,3 +24,12 @@ Set `WALLET_ORIGIN=http://localhost:5173` and `WEBAUTHN_RP_ID=localhost` for loc
 
 ## Scope / ownership
 Contributor B owns this backend foundation; Contributor A's UI must not enable create-wallet until these blockers are resolved. Keep all testing on Stellar Testnet.
+
+
+## B3–B7 payment backend
+
+The native-XLM payment engine, asynchronous MySQL repository contract, API schemas, relayer, verification/indexing and retry worker are implemented under `src/payments`. Read [PAYMENT_BACKEND.md](../../docs/PAYMENT_BACKEND.md) for the composition contract, endpoint specification, persistence and recovery rules. The default server returns 503 on payment routes until a verified B1/B2 session and on-chain signer-policy adapter are supplied.
+
+Use Node 22+ and `npm ci`. Run `npm run typecheck`, `npm test` and `npm run schema`. Existing development-only passkey endpoints are not payment authentication. Do not enable spending before the B1/B2 deployment/recovery and live Testnet integration gates pass.
+
+MySQL persistence is owned by Sunil. This PR injects `PaymentRepository` and includes no alternative database implementation. See [MYSQL_PAYMENT_CONTRACT.md](../../docs/MYSQL_PAYMENT_CONTRACT.md) for the transaction/locking handoff and pending MySQL integration tests.

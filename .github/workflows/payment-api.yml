@@ -1,0 +1,33 @@
+name: Payment API checks
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'docs/payments.openapi.json'
+      - '.github/workflows/payment-api.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'apps/api/**'
+      - 'docs/payments.openapi.json'
+      - '.github/workflows/payment-api.yml'
+permissions:
+  contents: read
+jobs:
+  payment-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run schema
+      - run: git diff --exit-code -- ../../docs/payments.openapi.json

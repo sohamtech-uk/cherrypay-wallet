@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
-import type { AuthenticatorTransportFuture, RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
+import type { AuthenticatorTransportFuture, RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/types';
 
 type Credential = { id:string; publicKey:Uint8Array; counter:number; transports?:AuthenticatorTransportFuture[] };
 type Account = { id:string; userID:Uint8Array; credentials:Credential[] };
@@ -44,3 +44,4 @@ export async function finishAuthentication(accountID:string,requestID:string,res
  credential.counter=verification.authenticationInfo.newCounter;
  return {verified:true,accountID,credentialCount:account!.credentials.length};
 }
+
