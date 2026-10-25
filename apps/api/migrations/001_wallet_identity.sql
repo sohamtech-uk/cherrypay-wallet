@@ -1,6 +1,7 @@
 -- Cherry Pay app database (PostgreSQL 17). Do not use wallet-backend's internal schema.
 CREATE TABLE wallet_accounts (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY CHECK (id = lower(trim(id))),
+  email_verified_at TIMESTAMPTZ,
   webauthn_user_id TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -28,3 +29,10 @@ CREATE TABLE wallet_sessions (
   expires_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX wallet_sessions_expires_idx ON wallet_sessions(expires_at);
+
+CREATE TABLE wallet_email_verifications (
+ account_id TEXT PRIMARY KEY REFERENCES wallet_accounts(id) ON DELETE CASCADE,
+ token_hash TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ attempts INTEGER NOT NULL DEFAULT 0
+);
