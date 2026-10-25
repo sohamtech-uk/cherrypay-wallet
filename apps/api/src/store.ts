@@ -17,6 +17,7 @@ function credentials(rows: any[]): Cred[] {
 export async function createAccount(email?: string) {
   const id = randomUUID(), userID = randomBytes(32).toString('base64url');
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id,email) VALUES($1,$2,$3)',[id,userID,email ? normalizeEmail(email) : null]);
+  if(email) await pool.query('INSERT INTO wallet_email_identities(email,account_id) VALUES($1,$2)',[normalizeEmail(email),id]);
   return {id,webauthn_user_id:userID};
 }
 /** Emails are lookup identifiers; account UUIDs remain permanent ownership keys. */
@@ -28,7 +29,7 @@ export function normalizeEmail(value: string): string {
 export async function getAccountByEmail(value: string) {
   const email = normalizeEmail(value);
   const { rows } = await pool.query<{id:string;webauthn_user_id:string}>(
-    'SELECT id,webauthn_user_id FROM wallet_accounts WHERE email=$1 AND email_verified_at IS NOT NULL', [email]);
+    'SELECT a.id,a.webauthn_user_id FROM wallet_accounts a JOIN wallet_email_identities e ON e.account_id=a.id WHERE e.email=$1 AND e.verified_at IS NOT NULL', [email]);
   return rows[0];
 }
 export async function claimEmail(accountID: string, value: string) {
@@ -37,6 +38,7 @@ export async function claimEmail(accountID: string, value: string) {
     'UPDATE wallet_accounts SET email=$1,email_verified_at=NULL WHERE id=$2 AND email IS NULL RETURNING id',
     [email, accountID]);
   if (result.rowCount !== 1) throw Error('EMAIL_ALREADY_ASSIGNED');
+  await pool.query('INSERT INTO wallet_email_identities(email,account_id) VALUES($1,$2)',[email,accountID]);
 }
 export async function createEmailVerification(accountID: string) {
   const code = String(randomBytes(4).readUInt32BE(0) % 100000000).padStart(8, '0');
@@ -55,6 +57,7 @@ export async function verifyEmail(accountID: string, code: string) {
       [accountID,hashToken(code)]);
     if (verified.rowCount !== 1) { await client.query('ROLLBACK'); return false; }
     await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1 AND email IS NOT NULL',[accountID]);
+    await client.query('UPDATE wallet_email_identities SET verified_at=NOW() WHERE account_id=$1',[accountID]);
     await client.query('COMMIT');
     return true;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
