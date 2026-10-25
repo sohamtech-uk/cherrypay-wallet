@@ -95,7 +95,9 @@ def main():
     if not re.fullmatch(r"[a-z][a-z0-9-]{1,22}[a-z0-9]",c["vaultName"]): raise ValueError("Invalid vault name")
     env=az("containerapp", "env", "show", "--ids", c["environmentId"])
     network=az("network", "vnet", "show", "--ids", c["vnetId"])
-    registry=az("acr", "show", "--ids", c["registryId"])
+    registry=az("acr", "show", "-g", resources["registryId"][1], "-n", resources["registryId"][4])
+    if registry.get("roleAssignmentMode") not in [None,"LegacyRegistryPermissions"]:
+        raise ValueError("Registry requires repository-scoped ABAC roles; this bootstrap uses AcrPull")
     if env["location"].replace(" ", "").lower()!=c["location"].replace(" ", "").lower():
         raise ValueError("App and environment regions differ")
     validate_network(c,network,env)
