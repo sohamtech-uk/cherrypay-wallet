@@ -6,6 +6,8 @@ export type BalanceSnapshot = { amountStroops: string; ledger: number; updatedAt
  */
 export interface PaymentRepository {
   wallet(id: string, owner: string): Promise<Wallet>;
+  /** Owner-scoped discovery, bounded to 101 rows so callers can reject >100. */
+  walletsForOwner(owner: string): Promise<Wallet[]>;
   allWallets(): Promise<Wallet[]>;
   get(id: string): Promise<Attempt>;
   byKey(walletId: string, key: string): Promise<Attempt | undefined>;
@@ -39,3 +41,4 @@ export function validateAttemptUpdate(previous: Attempt, next: Attempt) {
 export function validateEventRecord(event: TransferEvent) {
   requireThat(/^[a-f0-9]{64}$/.test(event.transactionHash) && event.id === `${NETWORK}:${event.transactionHash}:${event.operationIndex}:${event.eventIndex}` && Number.isSafeInteger(event.ledger) && event.ledger > 0 && Number.isSafeInteger(event.operationIndex) && event.operationIndex >= 0 && Number.isSafeInteger(event.eventIndex) && event.eventIndex >= 0 && /^[1-9]\d*$/.test(event.amountStroops), 'INVALID_EVENT_RECORD');
 }
+

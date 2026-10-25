@@ -65,8 +65,12 @@ addresses or keys are supplied. Existing `wallet_onchain_accounts` rows must mat
 the approved owner, wallet ID, address and freshly read policy fingerprint. The
 initial outgoing destination policy must be exactly `['classic']` (C→G). A mismatch
 fails startup without rewriting the stored policy or broadcasting a transaction.
-The default server entry point remains disabled until that explicit composition
-is configured; there is no public provisioning API or automatic deployment.
+The default server entry point remains disabled without explicit configuration.
+It now loads a strict public manifest when `WALLET_PAYMENTS_ENABLED=true`, verifies
+the dedicated relayer identity and saved bindings, then composes the runtime before
+listening. An operator CLI checks/provisions already accepted deployed accounts
+atomically without overwriting authority. There is no public provisioning API or
+automatic deployment. See [TESTNET_STARTUP.md](TESTNET_STARTUP.md).
 
 The API persists a one-use ticket bound to owner, session hash, wallet, attempt,
 request digest, authorization XDR hash, policy, allowed credentials and expiry.
@@ -81,7 +85,14 @@ ledger entries, their TTL, Testnet identity, and current recovery policy before
 publishing funding instructions. Its approved deployment map must be populated only
 after the deployment and independent recovery acceptance gate, not from client data.
 
-The browser prefers advertised `approvalMode: webauthn`: it verifies the options
+Authenticated wallet discovery now removes the manual deployed-wallet-ID field.
+A single owned wallet opens automatically; multiple wallets require selection.
+The API scopes discovery by the verified session owner. Expired/disconnected
+sessions cannot be restored by late frontend responses.
+
+The browser prefers advertised `approvalMode: webauthn`, even if an external signer
+was injected. The raw approval route is disabled in WebAuthn mode so it cannot skip
+the API RP/origin/counter checks. The browser verifies the options
 response against the reviewed attempt, calls the authenticator, then posts the
 assertion. On timeout it keeps the attempt key and checks status; it never posts a
 replacement. Fee labels explicitly say maximum, not actual charged fee.

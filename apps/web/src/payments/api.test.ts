@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrKey } from '@stellar/stellar-sdk';
-import { apiClient, ApiError, connectPaymentAdapter, type ApiClient } from './api';
+import { apiClient, ApiError, connectPaymentAdapter, discoverWallets, type ApiClient } from './api';
 const address = StrKey.encodeContract(Buffer.alloc(32, 1));
 const destination = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
 const intent = { network: 'TESTNET' as const, from: address, destination, amountStroops: '10000001' };
@@ -83,13 +83,21 @@ it('uses begin/finish WebAuthn endpoints only when advertised by the backend',as
   });
   const assertion={id:'credential',rawId:'credential',type:'public-key' as const,response:{authenticatorData:'AA',clientDataJSON:'AA',signature:'AA'},clientExtensionResults:{}};
   const authenticate=vi.fn(async()=>assertion);
-  const adapter=await connectPaymentAdapter(api,wallet.id,undefined,authenticate);
+  const externalSigner=vi.fn(async()=> 'must-not-be-used');
+  const adapter=await connectPaymentAdapter(api,wallet.id,externalSigner,authenticate);
   expect(adapter.canSign).toBe(true);
   const q=await adapter.prepare(intent,'saved-key');
   expect((await adapter.approve(q.id,q)).status).toBe('pending');
   expect(authenticate).toHaveBeenCalledTimes(1);
+  expect(externalSigner).not.toHaveBeenCalled();
   expect(api).toHaveBeenCalledWith('wallets/wallet-1/attempts/attempt-1/approval/verify',{requestID:'request-1',response:assertion});
   expect(api.mock.calls.some(([path])=>path.endsWith('/approve'))).toBe(false);
+});
+
+it('validates discovery network, unique wallet identities and bounded response size',async()=>{
+  const row={id:wallet.id,address,network:'TESTNET'},api=vi.fn<ApiClient>();
+  api.mockResolvedValue({network:'TESTNET',items:[row]});expect(await discoverWallets(api)).toEqual([{id:wallet.id,address}]);
+  for(const page of [{network:'PUBLIC',items:[row]},{network:'TESTNET',items:[row,row]},{network:'TESTNET',items:[{...row,id:'path/escape'}]},{network:'TESTNET',items:[{...row,address:destination}]},{network:'TESTNET',items:Array(101).fill(row)}]){api.mockResolvedValue(page);await expect(discoverWallets(api)).rejects.toThrow();}
 });
 it('refuses a mutated begin-approval response before opening the authenticator',async()=>{
   const {api,raw}=fixture();

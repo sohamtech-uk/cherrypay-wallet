@@ -298,6 +298,41 @@
           }
         }
       },
+      "OwnedWallets": {
+        "type": "object",
+        "required": [
+          "network",
+          "items"
+        ],
+        "properties": {
+          "network": {
+            "const": "TESTNET"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "address",
+                "network"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "network": {
+                  "const": "TESTNET"
+                }
+              }
+            }
+          }
+        }
+      },
       "AttemptPage": {
         "type": "object",
         "required": [
@@ -438,6 +473,89 @@
     }
   },
   "paths": {
+    "/api/v1/wallets": {
+      "get": {
+        "summary": "Discover wallets belonging to the authenticated session",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Persisted result; pending is not confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedWallets"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted mutation origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No owned resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting intent, unresolved payment or state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Integration/RPC unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/wallets/{walletId}": {
       "parameters": [
         {
@@ -1045,7 +1163,8 @@
               }
             }
           }
-        }
+        },
+        "description": "External signer mode only. Returns 403 EXTERNAL_APPROVAL_DISABLED when WebAuthn approval is configured; use approval/options and approval/verify."
       }
     },
     "/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/options": {

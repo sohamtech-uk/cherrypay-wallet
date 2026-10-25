@@ -86,6 +86,10 @@ export class PostgresPaymentRepository implements PaymentRepository {
     const {rows}=await this.pool.query('SELECT * FROM wallet_onchain_accounts WHERE network=$1',['TESTNET']);
     return rows.map(walletOf);
   }
+  async walletsForOwner(owner:string):Promise<Wallet[]> {
+    const {rows}=await this.pool.query('SELECT * FROM wallet_onchain_accounts WHERE owner=$1 AND network=$2 ORDER BY id LIMIT 101',[owner,'TESTNET']);
+    return rows.map(walletOf);
+  }
   async get(id:string):Promise<Attempt> {
     const {rows}=await this.pool.query('SELECT * FROM wallet_payment_attempts WHERE id=$1',[id]);
     requireThat(rows.length===1,'ATTEMPT_NOT_FOUND',404);
@@ -183,3 +187,4 @@ export class PostgresPaymentRepository implements PaymentRepository {
     return rows[0]?{amountStroops:String(rows[0].amount_stroops),ledger:number(rows[0].ledger),updatedAt:number(rows[0].updated_at)}:null;
   }
 }
+

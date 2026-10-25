@@ -20,6 +20,9 @@ The CI workflow runs PostgreSQL integration tests with `RUN_DB_INTEGRATION=1` an
 
 ## Security and integration gate
 
-The current server intentionally calls `registerPaymentRoutes(app)` without payment dependencies, so payment endpoints return **503 PAYMENT_INTEGRATION_NOT_CONFIGURED**. PostgreSQL data or a WebAuthn login session is not on-chain spending permission. Do not enable wallet deployment or payment endpoints until B1/B2 verifies smart-account artifacts, transfer-bound passkey authorization, backup signer/recovery, owner session, policy fingerprint, and constrained fee relayer. All testing is Stellar Testnet only.
+Payments default to **503 PAYMENT_INTEGRATION_NOT_CONFIGURED**. The normal server can now load a reviewed deployment manifest through `WALLET_PAYMENT_MANIFEST` when `WALLET_PAYMENTS_ENABLED=true`, validate the dedicated `STELLAR_RELAYER_SECRET` identity and saved wallet policy, then enable the verified runtime. Missing or invalid configuration fails startup. PostgreSQL data or a WebAuthn login session alone is not on-chain spending permission.
+
+Use the operator-only `npm run wallet:provision -- --check` / `--apply` commands for already deployed and recovered accounts. They do not deploy contracts or change existing owner/policy bindings. See [TESTNET_STARTUP.md](../../docs/TESTNET_STARTUP.md) for the manifest format, Compose override, prerequisites and acceptance procedure. Authenticated `GET /api/v1/wallets` discovers only the session owner's wallets. WebAuthn mode requires the begin/verify endpoints and rejects raw approval submissions.
 
 For the persistence contract and RPC recovery guarantees, see [POSTGRESQL_PAYMENT_CONTRACT.md](../../docs/POSTGRESQL_PAYMENT_CONTRACT.md). [STELLAR_WALLET_BACKEND.md](../../docs/STELLAR_WALLET_BACKEND.md) documents the optional, separately operated GraphQL indexing service.
+

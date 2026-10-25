@@ -12,6 +12,7 @@ export class MemoryRepository implements PaymentRepository {
   register(wallet: Wallet) { this.wallets.set(wallet.id, copy(wallet)); }
   async wallet(id: string, owner: string) { const wallet = this.wallets.get(id); requireThat(wallet && wallet.owner === owner, 'WALLET_NOT_FOUND', 404); return copy(wallet); }
   async allWallets() { return [...this.wallets.values()].map(copy); }
+  async walletsForOwner(owner:string) { return [...this.wallets.values()].filter(w=>w.owner===owner).sort((a,b)=>a.id<b.id?-1:1).slice(0,101).map(copy); }
   private read(id: string) { const a = this.attempts.get(id); requireThat(a, 'ATTEMPT_NOT_FOUND', 404); return copy(a); }
   async get(id: string) { return this.read(id); }
   async byKey(id: string, key: string) { return copy([...this.attempts.values()].find(a => a.walletId === id && a.idempotencyKey === key)); }
@@ -53,3 +54,4 @@ export class MemoryRepository implements PaymentRepository {
   // Explicit test setup only; never part of the production repository interface.
   seedAttempt(a: Attempt) { this.attempts.set(a.id, copy(a)); }
 }
+

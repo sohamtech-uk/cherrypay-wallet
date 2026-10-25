@@ -55,6 +55,11 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
       const wallet = await dependencies.service.store.wallet(params.walletId, owner);
       return { service: dependencies.service, owner, wallet, id: params.attemptId! };
     };
+    scope.get('/api/v1/wallets', { schema: { querystring: {type:'object',additionalProperties:false} } }, async request => {
+      const wallets=await dependencies!.service.store.walletsForOwner(principals.get(request)!.subject);
+      requireThat(wallets.length<=100,'WALLET_DISCOVERY_LIMIT');
+      return {network:'TESTNET',items:wallets.map(wallet=>({id:wallet.id,address:wallet.address,network:'TESTNET'}))};
+    });
     scope.get('/api/v1/wallets/:walletId', { schema: { params: paymentSchemas.wallet } }, async request => {
       const { wallet } = await context(request);
       const receive = await dependencies?.receiveRoute?.(wallet.id, principals.get(request)!.subject);
@@ -78,6 +83,9 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
       const { service, owner, wallet, id } = await context(request); return publicAttempt(await service.get(owner, wallet.id, id));
     });
     scope.post('/api/v1/wallets/:walletId/attempts/:attemptId/approve', { schema: { params: paymentSchemas.attempt, body: paymentSchemas.approval } }, async (request, reply) => {
+      // Contract WebAuthn verification intentionally omits RP/origin/counter checks.
+      // Configured WebAuthn mode must always use our session-bound verification path.
+      requireThat(!dependencies?.approvals,'EXTERNAL_APPROVAL_DISABLED',403);
       const { service, owner, wallet, id } = await context(request); reply.code(202);
       return publicAttempt(await service.approve(owner, wallet.id, id, (request.body as { authXdr: string }).authXdr));
     });
