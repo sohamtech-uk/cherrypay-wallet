@@ -2,7 +2,7 @@
 .payment-screen p { color: #475569; }
 .payment-screen .error { color: #a71938; }
 .payment-screen label { display: block; font-weight: 650; margin: 16px 0 8px; }
-.payment-screen input:not([type=checkbox]), .payment-screen textarea { width: 100%; padding: 12px; border: 1px solid #64748b; border-radius: 8px; font: inherit; }
+.payment-screen input:not([type=checkbox]), .payment-screen textarea, .payment-screen select { width: 100%; min-width: 0; max-width: 100%; padding: 12px; border: 1px solid #64748b; border-radius: 8px; font: inherit; }
 .payment-screen textarea { resize: vertical; overflow-wrap: anywhere; }
 .payment-screen fieldset { border: 0; padding: 0; min-width: 0; }
 .payment-screen legend { font-weight: 700; }
@@ -21,3 +21,4 @@
 .skip-link { position: fixed; top: -100px; left: 12px; z-index: 10; background: white; color: #172438; padding: 12px; }
 .skip-link:focus { top: 12px; }
 @media (max-width: 400px) { .payment-screen { padding: 14px; } .payment-screen h1 { font-size: 25px; } }
+

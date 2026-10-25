@@ -11,6 +11,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { db, initializeStore, createAccount, createSession, sessionAccount, revokeSession, newChallenge, withLockedAccount, consumeLockedChallenge, credentialsLocked, addCredentialLocked } from './store.js';
 import { PostgresPaymentRepository } from './payments/postgres-repository.js';
 import { type Intent, type TransferEvent, type Wallet } from './payments/model.js';
+import { provisionAccounts } from './smart-account/provision.js';
+import { manifestFixture } from './smart-account/test-support/manifest.js';
+import { StrKey } from '@stellar/stellar-sdk';
 
 const integration = process.env.RUN_DB_INTEGRATION==='1' ? describe : describe.skip;
 integration('PostgreSQL wallet integration and transaction invariants', () => {
@@ -55,6 +58,8 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   it('scopes wallets to the authenticated owner',async () => {
     expect(await repository.wallet(wallet.id,account.id)).toMatchObject(wallet);
     await expect(repository.wallet(wallet.id,randomUUID())).rejects.toMatchObject({code:'WALLET_NOT_FOUND'});
+    expect((await repository.walletsForOwner(account.id)).map(w=>w.id)).toContain(wallet.id);
+    expect(await repository.walletsForOwner(randomUUID())).toEqual([]);
   });
   it('authenticates payment routes with persisted sessions and immediately observes revocation', async () => {
     const service = new PaymentService(repository, mockChain(), mockPolicy(), 1);
@@ -72,9 +77,38 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const response = await app.inject({ url, headers: { authorization: `Bearer ${session.token}` } });
       expect(response.statusCode).toBe(200);
       expect(response.json().address).toBe(wallet.address);
+      const discovered=await app.inject({url:'/api/v1/wallets',headers:{authorization:`Bearer ${session.token}`}});
+      expect(discovered.json().items).toEqual([{id:wallet.id,address:wallet.address,network:'TESTNET'}]);
+      expect((await app.inject({url:'/api/v1/wallets',headers:{authorization:`Bearer ${outsider.token}`}})).json().items).toEqual([]);
       await revokeSession(session.token);
       expect((await app.inject({ url, headers: { authorization: `Bearer ${session.token}` } })).statusCode).toBe(401);
     } finally { await app.close(); await revokeSession(outsider.token); }
+  });
+
+  it('provisions reviewed accounts atomically and idempotently without silently replacing saved authority',async()=>{
+    const owner=await createAccount(), fixture=manifestFixture();
+    const approved={...fixture.accounts[0],owner:owner.id,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.from(randomUUID().replaceAll('-','').repeat(2),'hex'))};
+    const manifest={...fixture,accounts:[approved]};
+    // Chain policy is injected; this test proves SQL boundaries, not live deployment.
+    const policies={current:async()=>({fingerprint:'d'.repeat(64),recoveryReady:true})};
+    const check=await provisionAccounts(manifest,false,{pool:db,policies});
+    expect(check).toMatchObject({applied:false,wallets:[{action:'create'}]});
+    expect(await repository.walletsForOwner(owner.id)).toEqual([]);
+    const results=await Promise.all([provisionAccounts(manifest,true,{pool:db,policies}),provisionAccounts(manifest,true,{pool:db,policies})]);
+    expect(results.flatMap(r=>r.wallets.map(w=>w.action)).sort()).toEqual(['create','unchanged']);
+    expect(await repository.wallet(approved.walletId,owner.id)).toMatchObject({address:approved.address,policy:'d'.repeat(64),routes:['classic']});
+    await expect(provisionAccounts(manifest,true,{pool:db,policies:{current:async()=>({fingerprint:'e'.repeat(64),recoveryReady:true})}})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
+    const outsider=await createAccount();
+    await expect(provisionAccounts({...manifest,accounts:[{...approved,owner:outsider.id}]},true,{pool:db,policies})).rejects.toThrow('EXISTING_WALLET_BINDING_CONFLICT');
+    expect((await repository.wallet(approved.walletId,owner.id)).policy).toBe('d'.repeat(64));
+  });
+  it('rolls back every new wallet if a later provisioning entry fails chain verification',async()=>{
+    const owner=await createAccount(), fixture=manifestFixture();
+    const a={...fixture.accounts[0],owner:owner.id,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.alloc(32,31))};
+    const b={...a,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.alloc(32,32))};
+    const policies={current:async(address:string)=>{if(address===b.address)throw Error('RPC failure');return {fingerprint:'d'.repeat(64),recoveryReady:true};}};
+    await expect(provisionAccounts({...fixture,accounts:[a,b]},true,{pool:db,policies})).rejects.toThrow('RPC failure');
+    expect(await repository.walletsForOwner(owner.id)).toEqual([]);
   });
   it('serializes idempotent creates and fences one unresolved relayer payment',async () => {
     const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'10000000',maxFeeStroops:'1000'};

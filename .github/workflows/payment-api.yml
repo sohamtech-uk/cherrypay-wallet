@@ -3,12 +3,16 @@ on:
   pull_request:
     paths:
       - 'apps/api/**'
+      - 'compose.yaml'
+      - 'compose.payments.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
   push:
     branches: [develop]
     paths:
       - 'apps/api/**'
+      - 'compose.yaml'
+      - 'compose.payments.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
 permissions:
@@ -47,8 +51,14 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: apps/api/package-lock.json
+      - name: Validate payment Compose override
+        working-directory: .
+        env:
+          WALLET_PAYMENT_MANIFEST: /tmp/cherrypay-approved-manifest.json
+        run: docker compose --env-file /dev/null -f compose.yaml -f compose.payments.yaml config --quiet
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
       - run: npm run schema
       - run: git diff --exit-code -- ../../docs/payments.openapi.json
+

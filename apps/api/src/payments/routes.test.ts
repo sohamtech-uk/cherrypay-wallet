@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PasskeyApprovalService } from './passkey-approval.js';
 import { MemoryRepository } from './test-support/memory-repository.js';
 import { PaymentService } from './service.js';
 import { registerPaymentRoutes } from './routes.js';
@@ -28,6 +29,29 @@ describe('authenticated payment API schemas', () => {
     expect((await server.inject({ method: 'POST', url: path, headers, payload: { ...intent, amountStroops: '2' } })).statusCode).toBe(409);
     await server.close();
   });
+});
+
+it('discovers only session-owned wallets and rejects an owner supplied in the query',async()=>{
+  store.register({...wallet,id:'bob-wallet',owner:'bob'});
+  const server=await app();
+  try {
+    const result=await server.inject({url:'/api/v1/wallets'});
+    expect(result.json()).toEqual({network:'TESTNET',items:[{id:wallet.id,address:wallet.address,network:'TESTNET'}]});
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect((await server.inject({url:'/api/v1/wallets?owner=bob'})).statusCode).toBe(400);
+  } finally {await server.close();}
+  const unauthenticated=await app(null);
+  expect((await unauthenticated.inject({url:'/api/v1/wallets'})).statusCode).toBe(401);await unauthenticated.close();
+});
+it('cannot bypass the WebAuthn ticket verifier through the raw approval endpoint',async()=>{
+  const chain=mockChain(),service=new PaymentService(store,chain,mockPolicy(),1),server=Fastify();
+  const approve=vi.spyOn(service,'approve');
+  await registerPaymentRoutes(server,{service,origin:headers.origin,authenticate:async()=>({subject:wallet.owner,sessionHash:'session'}),approvals:{} as PasskeyApprovalService});
+  try {
+    const result=await server.inject({method:'POST',url:`${path}/attempt-1/approve`,headers,payload:{authXdr:'AAAA'}});
+    expect(result.statusCode).toBe(403);expect(result.json().error).toBe('EXTERNAL_APPROVAL_DISABLED');
+    expect(approve).not.toHaveBeenCalled();expect(chain.authorize).not.toHaveBeenCalled();expect(chain.submit).not.toHaveBeenCalled();
+  } finally {await server.close();}
 });
 
 it('advertises approval capability only when configured and fails closed on begin/finish',async()=>{
