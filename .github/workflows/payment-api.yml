@@ -5,6 +5,7 @@ on:
       - 'apps/api/**'
       - 'compose.yaml'
       - 'compose.payments.yaml'
+      - 'compose.activation.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
   push:
@@ -13,6 +14,7 @@ on:
       - 'apps/api/**'
       - 'compose.yaml'
       - 'compose.payments.yaml'
+      - 'compose.activation.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
 permissions:
@@ -56,6 +58,9 @@ jobs:
         env:
           WALLET_PAYMENT_MANIFEST: /tmp/cherrypay-approved-manifest.json
         run: docker compose --env-file /dev/null -f compose.yaml -f compose.payments.yaml config --quiet
+      - name: Validate activation Compose override
+        working-directory: .
+        run: docker compose --env-file /dev/null -f compose.yaml -f compose.activation.yaml config --quiet
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test

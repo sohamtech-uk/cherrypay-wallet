@@ -51,6 +51,7 @@ export interface PaymentAdapter {
   receive?: { address: string; route: RouteKind; instructions: string };
   canSign?: boolean;
   persistentPreview?: boolean;
+  payroll?: PayrollAdapter;
   getBalance?(): Promise<{ amountStroops: string; ledger: number; updatedAt: number } | null>;
   getQuote?(id: string): Promise<Quote>;
   cancelAttempt?(id: string): Promise<Attempt>;
@@ -65,3 +66,13 @@ export interface PaymentAdapter {
   listAttempts(cursor?: string): Promise<{ items: Attempt[]; nextCursor?: string }>;
 }
 
+
+export type PayRunInput = { network: 'TESTNET'; reference: string; maxFeeStroops: string; items: { reference: string; destination: string; amountStroops: string }[] };
+export type PayRun = Omit<PayRunInput, 'items'> & { id: string; totalStroops: string; confirmedCount: number; status: 'draft' | 'in_progress' | 'completed'; items: (PayRunInput['items'][number] & { attempt: Attempt | null })[] };
+export type PayRunSummary = { id: string; reference: string; createdAt: number; recipientCount: number };
+export interface PayrollAdapter {
+  create(input: PayRunInput): Promise<PayRun>;
+  get(id: string): Promise<PayRun>;
+  list(cursor?: string): Promise<{ items: PayRunSummary[]; nextCursor?: string }>;
+  prepare(runId: string, reference: string): Promise<Attempt>;
+}

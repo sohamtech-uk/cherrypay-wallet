@@ -1,3 +1,4 @@
+import type { WalletBackendClient } from '../indexing/wallet-backend.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { PaymentError, publicAttempt, requireThat, type Intent } from './model.js';
 import type { PasskeyApprovalService } from './passkey-approval.js';
@@ -25,6 +26,7 @@ export const paymentSchemas = {
 };
 export type PaymentDependencies = {
   service: PaymentService;
+  indexer?: Pick<WalletBackendClient, 'account'>;
   // B1/B2 session integration. Never derive identity from body/accountID or an unverified header.
   authenticate(request: FastifyRequest): Promise<{ subject: string; sessionHash?: string } | null>;
   origin: string;
@@ -109,6 +111,13 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
     });
     scope.post('/api/v1/wallets/:walletId/attempts/:attemptId/cancel', { schema: { params: paymentSchemas.attempt, body: { type: 'object', additionalProperties: false } } }, async request => {
       const { service, owner, wallet, id } = await context(request); return publicAttempt(await service.cancel(owner, wallet.id, id));
+    });
+    scope.get('/api/v1/wallets/:walletId/indexed', { schema: { params: paymentSchemas.wallet, querystring: {type:'object',additionalProperties:false} } }, async request => {
+      const { wallet } = await context(request);
+      requireThat(dependencies?.indexer, 'INDEXER_NOT_CONFIGURED',503);
+      const account = await dependencies.indexer.account(wallet.address);
+      requireThat(account.address === wallet.address, 'INDEXER_ADDRESS_MISMATCH');
+      return {network:'TESTNET',source:'wallet-backend',verified:false,observedAt:new Date().toISOString(),account};
     });
     scope.get('/api/v1/wallets/:walletId/balance', { schema: { params: paymentSchemas.wallet } }, async request => {
       const { service, wallet } = await context(request); return { network: 'TESTNET', address: wallet.address, snapshot: await service.store.balance(wallet.address) };

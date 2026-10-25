@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-import { apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
+import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
+import { parseDeployment, type DeploymentView } from './deployment';
 import type { PaymentAdapter } from './model';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
+const legacyAccountId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
@@ -12,10 +14,12 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const token = useRef<string | undefined>(undefined);
   const deadline = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const poll = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const generation = useRef(0);
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
   const [email, setEmail] = useState(savedAccountId);
+  const [legacyLogin, setLegacyLogin] = useState(() => legacyAccountId.test(savedAccountId()));
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -25,45 +29,58 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [deployment, setDeployment] = useState<{status:string;nextAction?:string;address?:string|null}|null>(null);
-  const [offerDeployment, setOfferDeployment] = useState(false);
+  const [deploymentStatus, setDeploymentStatus] = useState('');
+  const [deployment, setDeployment] = useState<DeploymentView | null>(null);
   useEffect(() => () => {
-    generation.current++; clearTimeout(expiry.current);
+    generation.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
     const abandoned = token.current; token.current = undefined;
     if (abandoned) void revoke(abandoned).catch(() => { /* Server expiry bounds an interrupted logout. */ });
   }, []);
   const active = (id: number) => generation.current === id && !!token.current && Date.now() < deadline.current;
   function clearSession(message = '') {
-    generation.current++; token.current = undefined; clearTimeout(expiry.current);
-    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeployment(null); setOfferDeployment(false);
+    generation.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
+    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
   async function openWallet(selected: OwnedWallet, id: number) {
-    const adapter = await connectPaymentAdapter(apiClient(() => token.current), selected.id, signer);
+    const session = token.current;
+    const adapter = await connectPaymentAdapter(apiClient(() => session), selected.id, signer);
     if (!active(id)) return;
     if (adapter.address !== selected.address) throw Error('Wallet identity changed. Reconnect to refresh your wallets.');
     onConnect(adapter); setCanSign(adapter.canSign !== false); setConnected(true);
   }
-  async function refreshDeployment(id:number) {
-    const response = object(await apiClient(() => token.current)('smart-account/deployment'));
-    if (active(id)) setDeployment({status:text(response.status),address:typeof response.address==='string'?response.address:null});
-  }
-  async function requestDeployment() {
-    if (!active(generation.current)) { clearSession('Reconnect before creating your wallet.'); return; }
-    const id=generation.current; setBusy(true); setError('');
+  async function loadDeployment(id: number, reserve = false) {
+    clearTimeout(poll.current);
+    if (!active(id)) return;
+    const session = token.current;
     try {
-      const response=object(await apiClient(() => token.current)('smart-account/deployment', {}));
+      const value = await apiClient(() => session)('smart-account/deployment', reserve ? {} : undefined);
       if (!active(id)) return;
-      setDeployment({status:text(response.status),nextAction:typeof response.nextAction==='string'?response.nextAction:undefined});
-      setOfferDeployment(false);
-      setNotice(response.status==='AWAITING_PASSKEY'?'Add a second independent passkey to continue wallet setup.':'Your smart-wallet deployment request has been saved. Deployment is not active yet.');
-    } catch(e) { if(active(id))setError(e instanceof Error?e.message:'Unable to request wallet creation. Verify your email first.'); }
-    finally { if(active(id))setBusy(false); }
+      const view = parseDeployment(value);
+      setDeployment(view); setDeploymentStatus(view.status);
+      if (view.enabled && ['PENDING','SUBMITTED'].includes(view.status)) {
+        poll.current = setTimeout(() => { void loadDeployment(id); }, 5000);
+      }
+    } catch (e) {
+      if (!active(id)) return;
+      if (e instanceof ApiError && e.status === 401) { clearSession('Your session expired. Reconnect with your passkey.'); return; }
+      setDeployment(null); setDeploymentStatus('UNAVAILABLE');
+      setError('Provisioning status is unavailable. Your passkey profile remains connected. Refresh deployment status to retry.');
+    }
   }
   async function loadWallets(id: number) {
-    const owned = await discoverWallets(apiClient(() => token.current));
+    const session = token.current;
+    let owned: OwnedWallet[];
+    try { owned = await discoverWallets(apiClient(() => session)); }
+    catch (e) {
+      // A new primary-controlled contract may exist before payment/recovery activation.
+      // Only this explicit disabled-runtime response is an empty discovery fallback.
+      if (!(e instanceof ApiError && e.status === 503 && e.code === 'PAYMENT_INTEGRATION_NOT_CONFIGURED')) throw e;
+      owned = [];
+    }
     if (!active(id)) return;
-    setWallets(owned); setWalletId(owned[0]?.id ?? '');
+    setWallets(owned); setWalletId(owned[0]?.id ?? ''); setDeploymentStatus(''); setDeployment(null);
+    if (owned.length === 0) await loadDeployment(id, true);
     if (owned.length === 1) await openWallet(owned[0], id);
   }
   async function adoptSession(value: unknown, owner: string, id: number) {
@@ -74,9 +91,8 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       throw Error('Invalid authenticated session. Reconnect with your account ID.');
     }
     const previous = token.current;
-    // Invalidate any open review when a newly verified session replaces the old one.
     if (previous) { onConnect(null); setConnected(false); }
-    clearTimeout(expiry.current);
+    clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
     setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
@@ -110,7 +126,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function register(additional: boolean) {
     if (lock.current) return;
     if (additional && !active(generation.current)) { clearSession('Reconnect before adding a passkey.'); return; }
-    const id = ++generation.current; lock.current = true; setBusy(true); setError(''); setNotice('');
+    const id = ++generation.current; clearTimeout(poll.current); lock.current = true; setBusy(true); setError(''); setNotice('');
     const api = apiClient(() => token.current);
     let verifying = false;
     try {
@@ -120,7 +136,6 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       if (additional && owner !== accountId) throw Error('Enrollment account changed. Reconnect before trying again.');
       if (!additional) {
         setAccountId(owner);
-        // Save before the ceremony: verification might commit while its response is lost.
         try { localStorage.setItem(accountStorageKey, owner); setNotice('Your account ID is saved on this browser. Keep a separate copy for sign-in.'); }
         catch { setNotice('This browser cannot save your account ID. Copy it and keep it for sign-in.'); }
       }
@@ -135,7 +150,6 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
         if (!additional) setOfferDeployment(true);
       }
     } catch (e) {
-      // Cancelling a backup ceremony before verification leaves the existing session usable.
       if (additional && !verifying && active(id)) setError(e instanceof Error ? e.message : 'Passkey enrollment cancelled. Try again when ready.');
       else await fail(id, e, true);
     } finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
@@ -148,6 +162,12 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     lock.current = true; setBusy(true); setError('');
     try { await openWallet(selected, id); }
     catch (e) { if (active(id)) { onConnect(null); setConnected(false); setError(e instanceof Error ? e.message : 'Unable to open this wallet.'); } }
+    finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
+  }
+  async function refreshDeployment() {
+    if (lock.current || !active(generation.current)) return;
+    const id = generation.current; lock.current = true; setBusy(true); setError('');
+    try { await loadDeployment(id, deploymentStatus === 'NOT_STARTED'); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
   async function disconnect() {
@@ -164,20 +184,31 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   }
   return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
     <h2>{authenticated ? 'Your passkey profile' : 'Connect or create a passkey profile'}</h2>
-    <p>Use your email address as your Account ID and sign in with your passkey. Creating a profile does not deploy or fund a wallet.</p>
+    <p>Use your email address and passkey to find your Testnet wallet. Where automatic deployment is enabled, your verified primary passkey is bound to a new C-address. Registration never funds a wallet.</p>
     {authenticated ? <>
       <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
-      <p>Your email is the account ID. Verify it before requesting deployment.</p>
-      {(offerDeployment || deployment?.status==='NOT_STARTED') && <div role="region" aria-label="Create smart wallet"><h3>Create your smart wallet</h3><p>Your passkey is ready. Would you like to create your Stellar Testnet smart wallet? You will need verified email and a second independent passkey before deployment can proceed.</p><button disabled={busy} onClick={() => void requestDeployment()}>Create smart wallet</button><button className="secondary-button" disabled={busy} onClick={() => setOfferDeployment(false)}>Not now</button></div>}
-      {deployment && deployment.status!=='NOT_STARTED' && <div role="status"><strong>Smart-wallet setup: {deployment.status.replaceAll('_',' ')}</strong>{deployment.address && <p>Contract address: {deployment.address}</p>}<p>Payments remain disabled until independent on-chain verification is complete.</p><button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment(generation.current)}>Refresh wallet status</button></div>}
-      {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <p role="status">No deployed wallet is linked to this account yet. Share your account ID with the Testnet pilot operator to complete wallet activation, then reconnect.</p> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
-      <p>For recovery preparation, add a passkey on another device or security key. Enrollment alone does not prove independent recovery or update on-chain signers.</p>
+      {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
+        {deployment?.address ? <>
+          <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>
+          <label htmlFor="deployed-contract">Deployed C-address</label><input id="deployed-contract" value={deployment.address} readOnly/>
+          <p>Deployment ledger: {deployment.ledger}. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.transactionHash}`} target="_blank" rel="noreferrer">View deployment transaction</a></p>
+          <p>Payments and funding instructions remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
+        </> : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
+        <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
+      </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
+      <p>Add an independent passkey on another device or security key. Off-chain enrollment alone does not add a backup on-chain signer or verify recovery.</p>
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
     </> : <>
-      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Email address (Account ID)</label><input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
-      <button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
+      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
+        <label><input type="checkbox" checked={legacyLogin} onChange={e => setLegacyLogin(e.target.checked)}/>Use a legacy account ID</label>
+        <label htmlFor="account-id">{legacyLogin ? 'Existing account ID' : 'Email address (Account ID)'}</label>
+        <input id="account-id" type={legacyLogin ? 'text' : 'email'} value={email} onChange={e => setEmail(e.target.value)} required autoComplete={legacyLogin ? 'off' : 'email'}/>
+        {legacyLogin && <p>Use the account ID saved when you created your original passkey profile. Your existing passkey is still required.</p>}
+        <button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button>
+      </fieldset></form>
+      <button className="secondary-button" disabled={busy || legacyLogin} onClick={() => void register(false)}>Create passkey profile</button>
       <p>New here? Create a profile, save its account ID, then add another passkey. Your device manages the passkeys.</p>
     </>}
     {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}

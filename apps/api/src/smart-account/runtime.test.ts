@@ -1,3 +1,4 @@
+import * as acceptance from './acceptance.js';
 import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ACCOUNT_V080_HASH, PinnedAccountAdapter, type ApprovedAccount } from './pinned-adapter.js';
@@ -7,6 +8,7 @@ import { wallet } from '../payments/test-fixtures.js';
 
 afterEach(() => vi.restoreAllMocks());
 function fixture() {
+  vi.spyOn(acceptance, 'verifyAccountAcceptance').mockResolvedValue({} as Awaited<ReturnType<typeof acceptance.verifyAccountAcceptance>>);
   const account: ApprovedAccount = {
     walletId: wallet.id, owner: wallet.owner, address: wallet.address,
     accountWasmHash: ACCOUNT_V080_HASH,
@@ -43,4 +45,10 @@ it('fails startup on signer changes, wrong saved address or unsupported destinat
     const f = fixture(); mutate(f);
     await expect(createPinnedPaymentRuntime(f.options)).rejects.toThrow();
   }
+});
+
+it('refuses to enable spending when deployment or backup-spend evidence cannot be verified', async () => {
+  const f = fixture();
+  vi.mocked(acceptance.verifyAccountAcceptance).mockRejectedValue(new Error('DEPLOYMENT_ADDRESS_NOT_CREATED'));
+  await expect(createPinnedPaymentRuntime(f.options)).rejects.toThrow('DEPLOYMENT_ADDRESS_NOT_CREATED');
 });

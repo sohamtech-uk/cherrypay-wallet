@@ -55,7 +55,7 @@ export async function verifyEmail(accountID: string, code: string) {
   finally { client.release(); }
 }
 export async function emailForAccount(accountID: string) {
-  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>('SELECT id AS email, email_verified_at FROM wallet_accounts WHERE id=$1',[accountID]);
+  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>("SELECT CASE WHEN position('@' in id)>0 THEN id ELSE NULL END AS email, email_verified_at FROM wallet_accounts WHERE id=$1",[accountID]);
   return rows[0];
 }
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
