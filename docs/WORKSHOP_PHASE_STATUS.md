@@ -10,7 +10,7 @@ then A7/B7 acceptance. PostgreSQL supersedes the notes' original MySQL choice.
 | 2 — B4 | Native XLM SAC preparation, exact authorization binding, fee-only relayer, begin/finish WebAuthn approval, source-pinned account codec | Reviewed deployment; actual passkey authorization on Testnet |
 | 3 — B5 | Independent committed-event checks, history, balances, canonical event identity, receive code/TTL verification | Live C→G evidence against the selected account/verifier |
 | 4 — B6 | Persistent idempotency/leases, same-bytes retry, unknown-outcome reconciliation and cursor | Live RPC timeout/restart exercise |
-| 5 — A4–A6 | Authenticated HTTP adapter, explicit receive metadata, fee-limit review, passkey approval, persisted status, indexed history/receipts, concrete trusted runtime composition | Supply accepted B1/B2 deployment configuration and run the browser/Testnet acceptance flow |
+| 5 — A4–A6 | Passkey profile enrollment, owned-wallet overview, authenticated HTTP adapter, explicit receive metadata, fee-limit review, passkey approval, persisted status, indexed history/receipts, concrete trusted runtime composition | Supply accepted B1/B2 deployment configuration and run the browser/Testnet acceptance flow |
 | 6 — A7/B7 | Automated negative tests and accessible recovery UI | Independent two-device recovery drill and screen-reader/narrow-screen browser acceptance |
 
 ## Contract selection finding
@@ -39,6 +39,12 @@ the Rust struct layout and actual P-256 signature encoding; they do not execute 
 deployed WASM or establish artifact provenance.
 
 Current code bytes, TTL and both signer rules must be read at the same ledger.
+When a rule getter omits signer/policy ID vectors, the pinned adapter resolves them
+through the contract registry getters. Every lookup must match that same ledger.
+Hydrated IDs participate in the policy fingerprint, so removing/re-registering a
+signer invalidates outstanding approvals. Already complete rule records retain
+their existing fingerprint. Hydration does not select another account artifact,
+change the structured digest scheme, or bypass reviewed startup configuration.
 Exactly two permanent Default rules are accepted, each with one separately owned
 P-256 key and no policies. A two-signer rule requiring both signatures is rejected
 as a backup arrangement. Normal sends select the primary rule explicitly. This
@@ -89,6 +95,14 @@ Authenticated wallet discovery now removes the manual deployed-wallet-ID field.
 A single owned wallet opens automatically; multiple wallets require selection.
 The API scopes discovery by the verified session owner. Expired/disconnected
 sessions cannot be restored by late frontend responses.
+
+Initial and additional passkey enrollment are now available in the profile panel.
+Registration options and verification require ES256/P-256. The public account ID is
+saved before registration for uncertain-response recovery; tokens remain in memory.
+Additional enrollment rotates the browser session and revokes the previous one.
+The connected overview shows exact indexed balance, its ledger/age, and verified
+activity/receipts with independent error recovery. Enrollment count never marks a
+wallet as recovery-ready or triggers automatic deployment.
 
 The browser prefers advertised `approvalMode: webauthn`, even if an external signer
 was injected. The raw approval route is disabled in WebAuthn mode so it cannot skip

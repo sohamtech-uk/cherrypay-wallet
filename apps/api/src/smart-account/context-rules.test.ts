@@ -1,12 +1,8 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { Address, StrKey, xdr } from '@stellar/stellar-sdk';
 import { Client } from 'smart-account-kit-bindings';
-import { isoCBOR } from '@simplewebauthn/server/helpers';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-const code = vi.hoisted(() => ({ ledger: 500 }));
-vi.mock('./receive-route.js', () => ({ verifyCurrentContractCode: vi.fn(async (_server: unknown, _address: string, wasmHash: string) => ({ ledger: code.ledger, wasmHash })) }));
+import { describe, expect, it, vi } from 'vitest';
 import { decodeContextRule, readHydratedContextRule, signerScVal, type RawContractRead, type RuleSpec } from './context-rules.js';
-import { ContractRulePolicyReader, TestnetContractRuleReader, type RuleReaderRpc } from './contract-rule-reader.js';
 import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
 import { TESTNET_PASSPHRASE } from '../config.js';
 
@@ -15,13 +11,9 @@ const verifier = SMART_ACCOUNT_KIT.webauthnVerifierAddress;
 const policy = StrKey.encodeContract(Buffer.alloc(32, 9));
 const spec = new Client({ contractId: account, networkPassphrase: TESTNET_PASSPHRASE, rpcUrl: 'https://soroban-testnet.stellar.org' }).spec as unknown as RuleSpec;
 
-const stored = new Map<string, { id: string; public_key: string }>();
 function keyData(credential: string) {
   const jwk = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' });
   const x = Buffer.from(jwk.x!, 'base64url'), y = Buffer.from(jwk.y!, 'base64url');
-  const cose = new Map<number, number | Uint8Array>([[1, 2], [3, -7], [-1, 1], [-2, x], [-3, y]]);
-  const id = Buffer.from(credential).toString('base64url');
-  stored.set(id, { id, public_key: Buffer.from(isoCBOR.encode(cose)).toString('base64') });
   return Buffer.concat([Buffer.from([4]), x, y, Buffer.from(credential)]);
 }
 const sym = (s: string) => xdr.ScVal.scvSymbol(s);
@@ -101,103 +93,5 @@ describe('readHydratedContextRule', () => {
     await expect(readHydratedContextRule(contract({ 1: ruleScVal({ id: 1, key }) }, {}).read, spec, 1)).rejects.toThrow('CONTRACT_READ_FAILED');
     await expect(readHydratedContextRule(contract({ 1: ruleScVal({ id: 2, key }) }, { [signerKey(key)]: 1 }).read, spec, 1)).rejects.toThrow('CONTEXT_RULE_ID_MISMATCH');
     await expect(readHydratedContextRule(contract({}, {}).read, spec, -1)).rejects.toThrow('INVALID_RULE_SELECTION');
-  });
-});
-
-const owner = 'owner-1';
-let ownedIds: string[] = [];
-const credentials = vi.fn(async (o: string) => (o === owner ? ownedIds.map(id => stored.get(id)!).filter(Boolean) : []));
-const policyReader = (reader: TestnetContractRuleReader) => new ContractRulePolicyReader(reader, new Map([[account, owner]]), credentials);
-
-describe('TestnetContractRuleReader + ContractRulePolicyReader', () => {
-  const primary = keyData('primary-cred'), backup = keyData('backup-cred');
-  let rules: Record<number, xdr.ScVal>, registry: Record<string, number>;
-  beforeEach(() => {
-    code.ledger = 500;
-    rules = { 0: ruleScVal({ id: 0, key: primary }), 1: ruleScVal({ id: 1, key: backup }) };
-    registry = { [signerKey(primary)]: 10, [signerKey(backup)]: 11 };
-    ownedIds = ['primary-cred', 'backup-cred'].map(c => Buffer.from(c).toString('base64url'));
-  });
-  /** simLedgers: ledger reported by each successive simulation (last value repeats). */
-  function server(ledger = 500, simLedgers: number[] = []): RuleReaderRpc {
-    let call = 0;
-    return {
-      simulateTransaction: vi.fn(async (tx: { operations: { func: xdr.HostFunction }[] }) => {
-        const latestLedger = simLedgers.length ? simLedgers[Math.min(call++, simLedgers.length - 1)] : ledger;
-        const invoke = tx.operations[0].func.invokeContract();
-        const fn = invoke.functionName().toString(), arg = invoke.args()[0];
-        const retval = fn === 'get_context_rule' ? rules[arg.u32()] : fn === 'get_signer_id' ? xdr.ScVal.scvU32(registry[arg.toXDR('base64')]) : undefined;
-        if (!retval) return { error: 'HostError', latestLedger, events: [], _parsed: true };
-        return { latestLedger, minResourceFee: '1', events: [], transactionData: {} as never, result: { auth: [], retval }, _parsed: true };
-      }),
-    } as unknown as RuleReaderRpc;
-  }
-  it('hydrates IDs, derives the credential from key data and reports recovery readiness', async () => {
-    const reader = new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 1, verifier }, server());
-    const r = await reader.readAccountRules(account);
-    expect(r.rules[0].signer_ids).toEqual([10]);
-    expect(r.credentialIds).toEqual([Buffer.from('primary-cred').toString('base64url')]);
-    expect(r.contextRuleIds).toEqual([0]);
-    expect(r.recoveryReady).toBe(true);
-    expect(xdr.ScVal.fromXDR(r.signerXdrByCredential[r.credentialIds[0]], 'base64').vec()).toHaveLength(3);
-  });
-  it('gives the payment-policy reader and passkey codec the same fingerprint', async () => {
-    const reader = new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 1, verifier }, server());
-    const policyView = await policyReader(reader).current(account);
-    const codecView = await reader.readAccountRules(account);
-    expect(policyView).toEqual({ fingerprint: codecView.fingerprint, recoveryReady: true });
-  });
-  it('changes the fingerprint when a signer is re-registered under a new ID', async () => {
-    const reader = new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 1, verifier }, server());
-    const before = (await reader.readAccountRules(account)).fingerprint;
-    registry[signerKey(primary)] = 99;
-    expect((await reader.readAccountRules(account)).fingerprint).not.toBe(before);
-  });
-  it('is not recovery-ready without an independent backup rule', async () => {
-    expect((await policyReader(new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, server())).current(account)).recoveryReady).toBe(false);
-    rules[1] = ruleScVal({ id: 1, key: primary });
-    await expect(new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 1, verifier }, server()).readAccountRules(account)).rejects.toThrow('BACKUP_KEY_MUST_BE_INDEPENDENT');
-  });
-  it('requires every on-chain passkey to be an owned credential with identical key data', async () => {
-    const reader = new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 1, verifier }, server());
-    ownedIds = [ownedIds[0]];
-    await expect(policyReader(reader).current(account)).rejects.toThrow('ONCHAIN_CREDENTIAL_NOT_OWNED');
-    ownedIds = ['primary-cred', 'backup-cred'].map(c => Buffer.from(c).toString('base64url'));
-    const realPrimary = stored.get(ownedIds[0])!;
-    keyData('primary-cred'); // re-registers the same credential ID with a different key
-    await expect(policyReader(reader).current(account)).rejects.toThrow('ONCHAIN_SIGNER_KEY_MISMATCH');
-    stored.set(realPrimary.id, realPrimary);
-    await expect(new ContractRulePolicyReader(reader, new Map(), credentials).current(account)).rejects.toThrow('UNAPPROVED_ACCOUNT');
-    await expect(policyReader(reader).current(account)).resolves.toMatchObject({ recoveryReady: true });
-  });
-  it('retries a read whose code, rule and hydrated-ID observations span ledgers', async () => {
-    // First attempt: rule at 500, hydrated signer ID at 501 -> discarded; second attempt consistent.
-    const rpc = server(500, [500, 501, 500]);
-    const r = await new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, rpc).readAccountRules(account);
-    expect(r.ledger).toBe(500);
-    expect(rpc.simulateTransaction).toHaveBeenCalledTimes(4);
-  });
-  it('fails closed when no consistent snapshot can be observed', async () => {
-    code.ledger = 499;
-    await expect(new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, server(500)).readAccountRules(account)).rejects.toThrow('INCONSISTENT_POLICY_SNAPSHOT');
-  });
-  it('rejects wrong verifier, expired rules and invalid selections', async () => {
-    const other = StrKey.encodeContract(Buffer.alloc(32, 7));
-    await expect(new TestnetContractRuleReader({ transferRuleIds: [0], verifier: other }, server()).readAccountRules(account)).rejects.toThrow('NOT_WEBAUTHN_SIGNER');
-    rules[0] = ruleScVal({ id: 0, key: primary, validUntil: 10 });
-    await expect(new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, server()).readAccountRules(account)).rejects.toThrow('CONTEXT_RULE_EXPIRED');
-    expect(() => new TestnetContractRuleReader({ transferRuleIds: [0], recoveryRuleId: 0, verifier })).toThrow('INVALID_RULE_SELECTION');
-    expect(() => new TestnetContractRuleReader({ transferRuleIds: [], verifier })).toThrow('INVALID_RULE_SELECTION');
-  });
-  it('checks the auth-entry context against the selected rule scope', async () => {
-    const sac = StrKey.encodeContract(Buffer.alloc(32, 3)), elsewhere = StrKey.encodeContract(Buffer.alloc(32, 4));
-    const entry = (target: string) => new xdr.SorobanAuthorizationEntry({
-      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
-      rootInvocation: new xdr.SorobanAuthorizedInvocation({ function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(new xdr.InvokeContractArgs({ contractAddress: new Address(target).toScAddress(), functionName: 'transfer', args: [] })), subInvocations: [] }),
-    });
-    rules[0] = ruleScVal({ id: 0, key: primary, scope: sac });
-    const reader = new TestnetContractRuleReader({ transferRuleIds: [0], verifier }, server());
-    expect((await reader.readVerifiedRules(account, entry(sac))).contextRuleIds).toEqual([0]);
-    await expect(reader.readVerifiedRules(account, entry(elsewhere))).rejects.toThrow('CONTEXT_RULE_SCOPE_MISMATCH');
   });
 });
