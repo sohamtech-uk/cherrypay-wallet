@@ -1,18 +1,11 @@
 import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {Pool,type PoolClient} from 'pg';
 import {runMigrations} from './migrations.js';
+import {databaseConfig} from './database-config.js';
 
-const pool = new Pool({
-  ...(process.env.DATABASE_URL ? { connectionString: process.env.DATABASE_URL } : {
-    host: process.env.DB_HOST ?? '127.0.0.1',
-    port: Number(process.env.DB_PORT ?? 5432),
-    user: process.env.DB_USER ?? 'wallet',
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME ?? 'cherrypay_wallet',
-  }),
-  max: 10,
-  connectionTimeoutMillis: 10_000,
-});
+const pool = new Pool(databaseConfig());
+// Idle connection failures must not crash the listener or disclose credentials.
+pool.on('error', () => console.error('WALLET_DATABASE_CONNECTION_LOST'));
 export const db = pool;
 export const initializeStore = () => runMigrations(pool);
 export const hashToken = (v:string) => createHash('sha256').update(v).digest('hex');
@@ -85,3 +78,4 @@ export async function updateCounterLocked(client:PoolClient,id:string,accountID:
   const result = await client.query('UPDATE wallet_credentials SET counter=$1 WHERE id=$2 AND account_id=$3 AND counter=$4',[newCounter,id,accountID,oldCounter]);
   if(result.rowCount!==1) throw Error('Concurrent authentication detected');
 }
+
