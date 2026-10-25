@@ -1,13 +1,22 @@
-import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
-import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
-import * as store from './store.js';
-export async function beginRegistration(rpID:string,accountID?:string,token?:string){
- const account=accountID?await store.getAccount(accountID):await store.createAccount();
- if(!account)throw Error('Account not found');
- const credentials=await store.getCredentials(account.id);
- if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');
- const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
- return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
+import { randomUUID } from 'node:crypto';
+import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
+import type { AuthenticatorTransportFuture, RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/types';
+
+type Credential = { id:string; publicKey:Uint8Array; counter:number; transports?:AuthenticatorTransportFuture[] };
+type Account = { id:string; userID:Uint8Array; credentials:Credential[] };
+type Pending = { challenge:string; accountID:string; purpose:'register'|'authenticate'; expires:number };
+// Development-only in-memory state: restart loses credentials and challenges. Not production persistence.
+const accounts = new Map<string,Account>();
+const pending = new Map<string,Pending>();
+const expiryMs = 120_000;
+export function clearDevelopmentState(){ accounts.clear();pending.clear(); }
+export function accountSummary(accountID:string){const account=accounts.get(accountID);return account?{id:account.id,credentialCount:account.credentials.length}:null;}
+export async function beginRegistration(accountID:string, rpID:string, rpName='Cherry Pay Wallet Testnet'){
+ if(!/^[a-zA-Z0-9_-]{8,80}$/.test(accountID))throw new Error('Invalid account identifier');
+ let account=accounts.get(accountID);
+ if(!account){account={id:accountID,userID:crypto.getRandomValues(new Uint8Array(32)),credentials:[]};accounts.set(accountID,account);}
+ const options=await generateRegistrationOptions({rpName,rpID,userID:account.userID,userName:account.id,attestationType:'none',authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:account.credentials.map(c=>({id:c.id,transports:c.transports}))});
+ const requestID=randomUUID();pending.set(requestID,{challenge:options.challenge,accountID,purpose:'register',expires:Date.now()+expiryMs});return {requestID,options};
 }
 export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string){
  const count=await store.withLockedAccount(accountID,async client=>{
@@ -40,3 +49,4 @@ export async function finishAuthentication(accountID:string,requestID:string,res
  });
  return {verified:true,accountID,credentialCount:count,...await store.createSession(accountID)};
 }
+
