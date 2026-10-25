@@ -1,4 +1,4 @@
-import { rejectLegacyAccountWasm } from './kit-manifest.js';
+import { requireApprovedAccountWasm } from './kit-manifest.js';
 import { createHash } from 'node:crypto';
 import { Address, StrKey, rpc } from '@stellar/stellar-sdk';
 import { TESTNET_PASSPHRASE, TESTNET_RPC_URL } from '../config.js';
@@ -41,7 +41,7 @@ export async function verifyTestnetDeployment(
   server: Pick<rpc.Server, 'getNetwork' | 'getTransaction'>,
 ): Promise<{ contractAddress: string; transactionHash: string; ledger: number }> {
   validateDeploymentEvidence(evidence);
-  rejectLegacyAccountWasm(evidence.wasmSha256);
+  requireApprovedAccountWasm(evidence.wasmSha256);
   const network = await server.getNetwork();
   if (network.passphrase !== TESTNET_PASSPHRASE) throw new Error('RPC_NETWORK_MISMATCH');
   const transaction = await server.getTransaction(evidence.deploymentTransactionHash);
