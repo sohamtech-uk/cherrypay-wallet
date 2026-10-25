@@ -20,17 +20,8 @@ app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.q
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:false}));
 app.post('/api/v1/passkeys/registration/options',async(req,reply)=>{try{const id=(req.body as {accountID?:string}|undefined)?.accountID,t=token(req.headers.authorization);if(id&&await sessionAccount(t)!==id)return reply.code(403).send({error:'Authentication required'});return await beginRegistration(config.rpID,id,id?t:undefined);}catch{return reply.code(400).send({error:'Cannot start enrollment'});}});
 app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});return await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);}catch{return reply.code(400).send({error:'Cannot verify enrollment'});}});
-app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{return await beginAuthentication((req.body as {accountID:string}).accountID,config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
+app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{const value=(req.body as {accountID?:string;email?:string});const account=value.email?await getAccountByEmail(value.email):undefined;return await beginAuthentication(account?.id??value.accountID??'',config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
 app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
-app.post('/api/v1/identity/email/resolve',async(req,reply)=>{
- try {
-  const value=(req.body as {email?:string}|undefined)?.email;
-  if(typeof value!=='string')return reply.code(400).send({error:'Invalid email'});
-  const account=await getAccountByEmail(value);
-  if(!account)return reply.code(400).send({error:'Cannot start authentication'});
-  return {accountID:account.id};
- }catch{return reply.code(400).send({error:'Cannot start authentication'});}
-});
 app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);const identity=await emailForAccount(id);return {accountID:id,email:identity?.email??null,emailVerified:!!identity?.email_verified_at,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:false};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 await registerSmartAccountRoutes(app);
