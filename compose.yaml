@@ -7,12 +7,19 @@ services:
       NODE_ENV: development
       PORT: "3001"
       HOST: "0.0.0.0"
-      WALLET_ORIGIN: http://localhost:5173
+      WALLET_ORIGIN: ${WALLET_ORIGIN:-http://localhost:5174}
       WEBAUTHN_RP_ID: localhost
+      DB_HOST: ${DB_HOST:-host.docker.internal}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-wallet}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: ${DB_NAME:-cherrypay_wallet}
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - ./apps/api/src:/app/src:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -29,7 +36,7 @@ services:
     environment:
       NODE_ENV: development
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:${WALLET_WEB_PORT:-5174}:5173"
     volumes:
       - ./apps/web/src:/app/src:ro
       - ./apps/web/index.html:/app/index.html:ro
@@ -38,3 +45,4 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
