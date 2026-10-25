@@ -61,7 +61,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     const post=(path:string,payload:Record<string,unknown>,token?:string)=>app.inject({method:'POST',url:`/api/v1/${path}`,headers:{origin:'https://wallet.example',...(token?{authorization:`Bearer ${token}`}:{})},payload});
     try {
       const primary=testPasskey(),backup=testPasskey();
-      const initial=(await post('passkeys/registration/options',{})).json();
+      const initial=(await post('passkeys/registration/options',{email:`${randomUUID()}@example.com`})).json();
       expect(initial.options.pubKeyCredParams).toEqual([{alg:-7,type:'public-key'}]);
       const enrolled=await post('passkeys/registration/verify',{accountID:initial.accountID,requestID:initial.requestID,response:primary.registration(initial.options.challenge)});
       expect(enrolled.statusCode).toBe(200);const first=enrolled.json();
@@ -95,7 +95,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     try {
       for(const failure of ['algorithm','origin','verification']) {
         const key=testPasskey(failure==='algorithm'?'EdDSA':'ES256');
-        const initial=(await post('options',{})).json();
+        const initial=(await post('options',{email:`${randomUUID()}@example.com`})).json();
         const response=key.registration(initial.options.challenge,failure==='origin'?'https://evil.example':'https://wallet.example',failure!=='verification');
         expect((await post('verify',{accountID:initial.accountID,requestID:initial.requestID,response})).statusCode).toBe(400);
         const result=await db.query('SELECT id FROM wallet_credentials WHERE account_id=$1',[initial.accountID]);
