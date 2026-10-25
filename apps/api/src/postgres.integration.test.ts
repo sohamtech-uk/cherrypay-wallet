@@ -84,4 +84,44 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     await repository.setBalance(wallet.address,'9000',250);
     expect(await repository.balance(wallet.address)).toMatchObject({amountStroops:'3000',ledger:300});
   });
+
+  it('persists signed attempt bytes across repository instances', async () => {
+    const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'25000000',maxFeeStroops:'1000'};
+    const key='persist_'+randomUUID().replaceAll('-','');
+    const created=await repository.create(wallet,intent,key);
+    const first=await repository.claim(created.id,['preparing']);
+    first.attempt.prepared={transactionXdr:'preview',authXdr:'auth',feeStroops:'100',expiresAt:Date.now()+120000,expirationLedger:50000,ledger:49900};
+    first.attempt.status='awaiting_approval';
+    await repository.finish(first.attempt,first.token);
+    const second=await repository.claim(created.id,['awaiting_approval']);
+    second.attempt.status='authorizing';
+    await repository.checkpoint(second.attempt,second.token);
+    second.attempt.status='ready';
+    second.attempt.signedXdr='test-signed-xdr';
+    second.attempt.transactionHash='c'.repeat(64);
+    await repository.finish(second.attempt,second.token);
+    const reopened=new PostgresPaymentRepository(db);
+    expect(await reopened.get(created.id)).toMatchObject({status:'ready',signedXdr:'test-signed-xdr',transactionHash:'c'.repeat(64)});
+    expect(await reopened.byKey(wallet.id,key)).toMatchObject({id:created.id});
+    const third=await reopened.claim(created.id,['ready']);
+    await expect(repository.checkpoint({...third.attempt,status:'unknown'},second.token)).rejects.toMatchObject({code:'LEASE_LOST'});
+    third.attempt.status='unknown';
+    await reopened.checkpoint(third.attempt,third.token);
+    expect((await reopened.get(created.id)).status).toBe('unknown');
+    third.attempt.status='failed';
+    await reopened.finish(third.attempt,third.token);
+  });
+  it('rolls back terminal status and relayer release on event identity collision',async () => {
+    const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'4444',maxFeeStroops:'1000'};
+    const attempt=await repository.create(wallet,intent,'collision_'+randomUUID().replaceAll('-',''));
+    const lease=await repository.claim(attempt.id,['preparing']);
+    const hash='a'.repeat(64);
+    const changed:TransferEvent={id:'TESTNET:'+hash+':0:0',transactionHash:hash,ledger:1234,operationIndex:0,eventIndex:0,from:wallet.address,to:'G'+'A'.repeat(55),amountStroops:'99999',closedAt:Date.now()};
+    lease.attempt.status='rejected';
+    await expect(repository.finish(lease.attempt,lease.token,[changed])).rejects.toMatchObject({code:'EVENT_ID_COLLISION'});
+    expect(await repository.get(attempt.id)).toMatchObject({status:'preparing',leaseToken:lease.token});
+    const {rows}=await db.query('SELECT attempt_id FROM wallet_relayer_locks WHERE id=$1',['TESTNET:native_xlm_sac:relayer']);
+    expect(rows[0].attempt_id).toBe(attempt.id);
+    await repository.finish(lease.attempt,lease.token);
+  });
 });
