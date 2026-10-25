@@ -40,7 +40,10 @@ describe('real XDR deployment construction with synthetic keys', () => {
     expect(args).toHaveLength(2);
     const signers = args[0].vec()!;
     expect(signers).toHaveLength(1);
-    expect(scValToNative(signers[0])).toEqual(['External', TESTNET_V080.verifierAddress, Buffer.from(f.descriptor.keyDataHex, 'hex')]);
+    const decoded = scValToNative(signers[0]) as [string,string,Uint8Array];
+    expect(decoded).toHaveLength(3);
+    expect(decoded.slice(0,2)).toEqual(['External', TESTNET_V080.verifierAddress]);
+    expect(Buffer.from(decoded[2]).toString('hex')).toBe(f.descriptor.keyDataHex);
     expect(args[1].map()).toHaveLength(0);
     expect(f.descriptor.keyDataHex).toContain(Buffer.from(f.credential.id,'base64url').toString('hex'));
     for (const change of [{ network: 'PUBLIC' }, { address: TESTNET_V080.verifierAddress }, { keyDataHex: '04' }, { accountWasmHash: 'a'.repeat(64) }]) {
