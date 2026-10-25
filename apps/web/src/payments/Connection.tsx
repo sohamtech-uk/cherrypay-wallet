@@ -24,6 +24,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [deploymentStatus, setDeploymentStatus] = useState('');
   useEffect(() => () => {
     generation.current++; clearTimeout(expiry.current);
     const abandoned = token.current; token.current = undefined;
@@ -45,6 +46,10 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     const owned = await discoverWallets(apiClient(() => token.current));
     if (!active(id)) return;
     setWallets(owned); setWalletId(owned[0]?.id ?? '');
+    if (owned.length === 0) {
+      const job = object(await apiClient(() => token.current)('smart-account/deployment', {}));
+      if (active(id)) setDeploymentStatus(text(job.status));
+    } else setDeploymentStatus('ACTIVE');
     if (owned.length === 1) await openWallet(owned[0], id);
   }
   async function adoptSession(value: unknown, owner: string, id: number) {
@@ -147,7 +152,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     {authenticated ? <>
       <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
-      {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <p role="status">No deployed wallet is linked to this account yet. Share your account ID with the Testnet pilot operator to complete wallet activation, then reconnect.</p> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
+      {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <p role="status">No deployed wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. On-chain deployment is not enabled yet.</p> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       <p>For recovery preparation, add a passkey on another device or security key. Enrollment alone does not prove independent recovery or update on-chain signers.</p>
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
