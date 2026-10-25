@@ -1,8 +1,9 @@
+import { registerPaymentRoutes } from './payments/routes.js';
 import Fastify from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { getConfig } from './config.js';
 import { accountSummary,beginRegistration,finishRegistration,beginAuthentication,finishAuthentication } from './registration.js';
-const config=getConfig();const app=Fastify({logger:true,bodyLimit:32*1024});
+const config=getConfig();const app=Fastify({logger:true,bodyLimit:32*1024,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
 app.addHook('onRequest',async(request,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(request.method==='POST'){const origin=request.headers.origin;if(origin!==config.origin){reply.code(403).send({error:'Untrusted origin'});return;}}});
 app.get('/health',async()=>({status:'ok',network:config.network,walletDeploymentEnabled:false}));
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:false}));
@@ -12,4 +13,7 @@ app.post('/api/v1/passkeys/authentication/options',async(request,reply)=>{try{co
 app.post('/api/v1/passkeys/authentication/verify',async(request,reply)=>{try{const {accountID,requestID,response}=request.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Passkey authentication could not be verified'});}});
 // No account discovery, wallet creation or transaction signing until a verified smart-account adapter exists.
 app.setNotFoundHandler((_request,reply)=>reply.code(404).send({error:'Not found'}));
+// Payment routes fail closed until B1/B2 supplies verified wallet/session adapters.
+await registerPaymentRoutes(app);
 app.listen({host:process.env.HOST ?? '127.0.0.1',port:config.port}).catch(error=>{app.log.error(error);process.exit(1);});
+
