@@ -1,3 +1,4 @@
+import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import { registerPaymentRoutes } from './payments/routes.js';
 import Fastify from 'fastify';
 import {getConfig} from './config.js';
@@ -18,6 +19,7 @@ app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {
 app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);return {accountID:id,credentialCount:credentials.length,recoveryReady:credentials.length>=2,walletDeploymentEnabled:false};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 // Payment routes stay disabled until verified wallet/session adapters are configured.
+await registerSmartAccountRoutes(app);
 await registerPaymentRoutes(app);
 initializeStore().then(()=>app.listen({host:process.env.HOST??'127.0.0.1',port:config.port})).catch(err=>{app.log.error(err);process.exit(1);});
 
