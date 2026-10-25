@@ -4,7 +4,8 @@ Infrastructure verified on 25 October 2026. This is a Testnet preview; payments 
 
 ## Running infrastructure
 
-- Preview: https://ca-cpw-wallet-testnet-uks.proudhill-de1f30f8.uksouth.azurecontainerapps.io/
+- Wallet: https://wallet.cherrymoney.co.uk/
+- Generated Azure hostname: https://ca-cpw-wallet-testnet-uks.proudhill-de1f30f8.uksouth.azurecontainerapps.io/
 - Resource group: `rg-cpw-wallet-testnet-uks`, UK South.
 - Container App: `ca-cpw-wallet-testnet-uks`; API and frontend share the same HTTPS ingress.
 - PostgreSQL: `pg-cpw-wallet-tn-cm65062`, PostgreSQL 17, B1ms, 32 GiB, seven-day backups, public access disabled.
@@ -12,7 +13,7 @@ Infrastructure verified on 25 October 2026. This is a Testnet preview; payments 
 
 Live checks passed for `/health`, `/ready`, `/api/v1/network`, and the `/history` SPA route. HTTP redirects to HTTPS. Unsupported origins receive HTTP 403; payment routes return HTTP 503 while the integration is disabled.
 
-The WebAuthn origin and RP ID are configured for `wallet.cherrymoney.co.uk`. The generated Azure hostname is for preview and health checks; passkey registration/sign-in must be accepted on the final domain after DNS and TLS are ready.
+The WebAuthn origin and RP ID are configured for `wallet.cherrymoney.co.uk`. DNS and TLS are now ready on that domain. Real browser passkey registration/sign-in acceptance remains outstanding; the generated Azure hostname is for preview and health checks.
 
 ## Release evidence
 
@@ -26,18 +27,18 @@ The WebAuthn origin and RP ID are configured for `wallet.cherrymoney.co.uk`. The
 - [Production container CI](https://github.com/sohamtech-uk/cherrypay-wallet/actions/runs/40231010827): passed, including Azure templates and bootstrap boundary checks.
 - Live `/api/v1/smart-account/capabilities` reports XLM only, pinned v0.8.0 configuration, and deployment/spending/recovery disabled. This endpoint reports configuration, not completed on-chain acceptance.
 
-## DNS to add when access is available
+## DNS and managed HTTPS
 
-At GoDaddy, in the `cherrymoney.co.uk` DNS zone, add only these records:
+These records were added at GoDaddy in the `cherrymoney.co.uk` DNS zone on 25 October 2026, with a one-hour TTL. Both resolve publicly:
 
 | Type | Name | Value |
 | --- | --- | --- |
 | CNAME | `wallet` | `ca-cpw-wallet-testnet-uks.proudhill-de1f30f8.uksouth.azurecontainerapps.io` |
 | TXT | `asuid.wallet` | `F8473B026A0197104EFF24406E6DF5FEDCFE4AB80F5C405878EE8EA973D7D948` |
 
-Neither record resolved during deployment verification. Check again for conflicts before adding them; preserve all existing mail, apex and application records. No CAA record was returned for the parent domain at verification time.
+Existing mail, apex and other application records were preserved. Keep the CNAME pointed directly at the Container App and retain the verification TXT record.
 
-After DNS propagates, run from the intended signed-in Azure subscription:
+The hostname was added to the wallet app. The certificate command uses the shared environment's full resource ID because its resource group differs from the app's:
 
 ```bash
 az containerapp hostname add \
@@ -45,15 +46,26 @@ az containerapp hostname add \
   --hostname wallet.cherrymoney.co.uk
 az containerapp hostname bind \
   -g rg-cpw-wallet-testnet-uks -n ca-cpw-wallet-testnet-uks \
-  --hostname wallet.cherrymoney.co.uk --validation-method CNAME
+  --hostname wallet.cherrymoney.co.uk \
+  --environment /subscriptions/5e8bcb62-85d3-4ca9-bc9d-8694bbe65062/resourceGroups/rg-cm-nonprod-uks/providers/Microsoft.App/managedEnvironments/cae-cm-nonprod-uks \
+  --validation-method CNAME
 curl --fail https://wallet.cherrymoney.co.uk/ready
 ```
 
-The managed certificate and custom-domain checks have not been completed. See [Azure hostname CLI](https://learn.microsoft.com/en-us/cli/azure/containerapp/hostname) and [deployment runbook](AZURE_DEPLOYMENT.md).
+Verified on 25 October 2026 at 21:21 UTC:
+
+- Managed certificate `mc-cae-cm-nonprod-wallet-cherrymon-7260` in `cae-cm-nonprod-uks`: provisioning `Succeeded`, validation `CNAME`, subject `wallet.cherrymoney.co.uk`.
+- App custom-domain binding: `SniEnabled`, referencing that managed certificate.
+- A TLS handshake with standard certificate and hostname verification succeeded using TLS 1.3. The certificate SAN is `wallet.cherrymoney.co.uk`, issued by DigiCert's `GeoTrust TLS RSA CA G1`, valid through 25 April 2027. Azure manages renewal; retain the direct CNAME and issuance prerequisites.
+- `http://wallet.cherrymoney.co.uk/ready` returns HTTP 301 to the HTTPS URL.
+- HTTPS `/health`, `/ready`, `/api/v1/network`, `/api/v1/smart-account/capabilities`, and `/history` return HTTP 200. Readiness reports `TESTNET`; deployment, spending and recovery remain disabled.
+- The Cherry Wallet overview loads in a browser at the custom hostname without a certificate warning. This does not constitute passkey enrollment or payment acceptance.
+
+See [Azure hostname CLI](https://learn.microsoft.com/en-us/cli/azure/containerapp/hostname) and [deployment runbook](AZURE_DEPLOYMENT.md).
 
 ## Remaining acceptance
 
-1. DNS, managed certificate, and real browser passkey enrollment/sign-in on the final hostname.
+1. Real browser passkey enrollment/sign-in on the final hostname.
 2. Reviewed smart-account deployment, independent backup signer and recovery proof (B1/B2).
 3. A real passkey-authorized Testnet XLM payment, exact confirmed event, balance/history/receipt, and timeout/restart reconciliation.
 4. Database restore drill and operational retention/monitoring acceptance.

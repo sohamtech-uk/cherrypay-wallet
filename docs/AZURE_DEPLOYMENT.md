@@ -87,9 +87,12 @@ Once public DNS resolves, bind a managed certificate:
 az containerapp hostname add -g "$AZURE_RESOURCE_GROUP" -n "$AZURE_CONTAINER_APP" \
   --hostname wallet.cherrymoney.co.uk
 az containerapp hostname bind -g "$AZURE_RESOURCE_GROUP" -n "$AZURE_CONTAINER_APP" \
-  --hostname wallet.cherrymoney.co.uk --validation-method CNAME
+  --hostname wallet.cherrymoney.co.uk \
+  --environment "$AZURE_CONTAINER_ENVIRONMENT_ID" --validation-method CNAME
 curl --fail https://wallet.cherrymoney.co.uk/ready
 ```
+
+Pass the full environment resource ID, including its resource group: the shared environment may be in a different resource group from the wallet app. Certificate issuance can take up to 20 minutes. Keep the command running until issuance and binding finish, then verify the live hostname.
 
 Verify the hostname is secured in Azure, HTTP redirects to HTTPS, `/api/v1/network` says TESTNET, and passkey enrollment/sign-in work on the final hostname. Verify independent client addresses do not share a single rate-limit bucket. The nginx real-IP configuration relies on Azure ingress appending its verified client IP at the right of `X-Forwarded-For`; do not expose this nginx listener directly through an arbitrary proxy or add public TCP ingress.
 
