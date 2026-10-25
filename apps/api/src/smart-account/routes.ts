@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { SMART_ACCOUNT_KIT } from './kit-manifest.js';
+import { TESTNET_V080 } from './kit-v080-preflight.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { sessionAccount } from '../store.js';
 import { createTestnetRpc } from './deployment-evidence.js';
@@ -16,16 +16,21 @@ export async function registerSmartAccountRoutes(app: FastifyInstance) {
     return {
       network: 'TESTNET',
       contractSelected: true,
-      candidate: SMART_ACCOUNT_KIT.name,
-      candidateVersion: SMART_ACCOUNT_KIT.version,
-      requiredStellarSdk: SMART_ACCOUNT_KIT.requiredStellarSdk,
-      accountWasmHash: SMART_ACCOUNT_KIT.accountWasmHash,
-      webauthnVerifierAddress: SMART_ACCOUNT_KIT.webauthnVerifierAddress,
-      securityStatus: SMART_ACCOUNT_KIT.securityStatus,
+      candidate: 'smart-account-kit',
+      candidateVersion: '0.8.0',
+      requiredStellarSdk: '16.3.x',
+      accountWasmHash: TESTNET_V080.accountWasmHash,
+      webauthnVerifierAddress: TESTNET_V080.verifierAddress,
+      webauthnVerifierWasmHash: TESTNET_V080.verifierWasmHash,
+      asset: 'XLM',
+      supportedAssets: ['XLM'],
+      supportsSwaps: false,
+      supportsFiatConversion: false,
+      securityStatus: 'PINNED_V080_ONCHAIN_ATTESTATION_REQUIRED',
       deploymentEnabled: false,
       spendingEnabled: false,
       recoveryEnabled: false,
-      reason: 'SDK_VERSION_MIGRATION_AND_ONCHAIN_ATTESTATION_REQUIRED',
+      reason: 'WALLET_DEPLOYMENT_AND_INDEPENDENT_RECOVERY_NOT_VERIFIED',
     };
   });
 
