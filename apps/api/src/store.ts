@@ -7,13 +7,27 @@ export const freshToken=()=>randomBytes(32).toString('base64url');
 type Cred={id:string;public_key:string;counter:number|string;transports:string[]};
 const normalize=(rows:RowDataPacket[])=>rows.map(r=>({...r,transports:typeof r.transports==='string'?JSON.parse(r.transports):r.transports})) as Cred[];
 export async function initializeStore(){
- const statements=[
- 'CREATE TABLE IF NOT EXISTS wallet_accounts(id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,webauthn_user_id VARCHAR(128) NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB',
- 'CREATE TABLE IF NOT EXISTS wallet_credentials(id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,public_key TEXT NOT NULL,counter BIGINT UNSIGNED NOT NULL DEFAULT 0,transports JSON NOT NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(account_id)) ENGINE=InnoDB',
- "CREATE TABLE IF NOT EXISTS wallet_challenges(id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,purpose ENUM('register_initial','register_backup','authenticate') NOT NULL,challenge VARCHAR(512) NOT NULL,session_hash CHAR(64) NULL,expires_at DATETIME(3) NOT NULL,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(expires_at)) ENGINE=InnoDB",
- 'CREATE TABLE IF NOT EXISTS wallet_sessions(token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,expires_at DATETIME(3) NOT NULL,FOREIGN KEY(account_id) REFERENCES wallet_accounts(id),INDEX(expires_at)) ENGINE=InnoDB'
- ];
- for(const statement of statements)await pool.query(statement);
+ const {readFile}=await import('node:fs/promises');
+ const {fileURLToPath}=await import('node:url');
+ const {dirname,resolve}=await import('node:path');
+ const schemaPath=resolve(dirname(fileURLToPath(import.meta.url)),'../sql/001_wallet_schema.sql');
+ const schema=await readFile(schemaPath,'utf8');
+ const expected=['wallet_accounts','wallet_credentials','wallet_challenges','wallet_sessions'];
+ const [rows]=await pool.query<RowDataPacket[]>(
+  'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (?,?,?,?)',
+  expected
+ );
+ const present=new Set(rows.map(row=>row.name as string));
+ if(expected.every(name=>present.has(name)))return;
+ // DDL is idempotent and does not modify unrelated Cherry Money tables.
+ for(const statement of schema.split(';').map(part=>part.replace(/^\\s*--[^\\n]*\\n/gm,'').trim()).filter(Boolean)){
+  await pool.query(statement);
+ }
+ const [after]=await pool.query<RowDataPacket[]>(
+  'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (?,?,?,?)',
+  expected
+ );
+ if(after.length!==expected.length)throw Error('Wallet schema initialization incomplete');
 }
 export async function createAccount(){
  const id=randomUUID(),userID=randomBytes(32).toString('base64url');
