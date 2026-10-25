@@ -1,3 +1,4 @@
+import { TransactionBuilder, StrKey } from '@stellar/stellar-sdk';
 import { createHash } from 'node:crypto';
 import type { Pool } from 'pg';
 import { db } from '../store.js';
@@ -21,7 +22,7 @@ export class DeploymentOutbox {
     if(intent.networkPassphrase!==TESTNET_PASSPHRASE)throw Error('TESTNET_ONLY');
     if(!/^[a-f0-9]{64}$/.test(intent.transactionHash) || !/^C[A-Z2-7]{55}$/.test(intent.contractAddress)
       || !intent.signedXdr || intent.signedXdr.length>100000)throw Error('INVALID_DEPLOYMENT_INTENT');
-    const client=await this.pool.connect();
+    // Recompute the hash from the signed Stellar XDR; never trust a supplied hash.\n    if(!StrKey.isValidContract(intent.contractAddress))throw Error('INVALID_CONTRACT_ADDRESS');\n    let parsed;\n    try { parsed=TransactionBuilder.fromXDR(intent.signedXdr,TESTNET_PASSPHRASE); }\n    catch { throw Error('INVALID_SIGNED_DEPLOYMENT_XDR'); }\n    if(parsed.hash().toString('hex')!==intent.transactionHash)throw Error('DEPLOYMENT_HASH_MISMATCH');\n    if(parsed.signatures.length===0)throw Error('UNSIGNED_DEPLOYMENT_INTENT');\n    const client=await this.pool.connect();
     try {
       await client.query('BEGIN');
       const result=await client.query(`UPDATE wallet_deployment_jobs SET signed_envelope=$3,
