@@ -2,6 +2,15 @@ export const STELLAR_NETWORK = 'TESTNET' as const;
 export const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 export const TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
 export const TESTNET_HORIZON_URL = 'https://horizon-testnet.stellar.org';
+export type ExchangeMailConfig = { tenantId: string; clientId: string; clientSecret: string; sender: string };
+export function getExchangeMailConfig(env: NodeJS.ProcessEnv = process.env): ExchangeMailConfig {
+ const tenantId = env.AZURE_MAIL_TENANT_ID ?? '';
+ const clientId = env.AZURE_MAIL_CLIENT_ID ?? '';
+ const clientSecret = env.AZURE_MAIL_CLIENT_SECRET ?? '';
+ const sender = env.AZURE_MAIL_SENDER ?? '';
+ if (!/^[0-9a-f-]{36}$/i.test(tenantId) || !/^[0-9a-f-]{36}$/i.test(clientId) || !clientSecret || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(sender)) throw Error('AZURE_MAIL_CONFIGURATION_INVALID');
+ return {tenantId,clientId,clientSecret,sender};
+}
 export function getConfig(env: NodeJS.ProcessEnv = process.env) {
  const origin = env.WALLET_ORIGIN ?? 'http://localhost:5173';
  const url = new URL(origin);
