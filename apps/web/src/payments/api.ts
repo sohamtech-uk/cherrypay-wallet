@@ -19,6 +19,18 @@ export function apiClient(token: () => string | undefined, transport: typeof fet
   };
 }
 export type ApiClient = ReturnType<typeof apiClient>;
+export type OwnedWallet = {id:string;address:string};
+export async function discoverWallets(api:ApiClient):Promise<OwnedWallet[]> {
+  const page=object(await api('wallets'));
+  if(page.network!==NETWORK || !Array.isArray(page.items) || page.items.length>100) throw Error('Invalid wallet discovery response.');
+  const items=page.items.map(value=>{
+    const wallet=object(value),id=text(wallet.id),address=text(wallet.address);
+    if(wallet.network!==NETWORK || !/^[a-zA-Z0-9_-]{1,128}$/.test(id) || addressKind(address)!=='contract') throw Error('Invalid owned wallet.');
+    return {id,address};
+  });
+  if(new Set(items.map(w=>w.id)).size!==items.length || new Set(items.map(w=>w.address)).size!==items.length) throw Error('Duplicate wallet identity.');
+  return items;
+}
 export function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid wallet service response.'); return value as Record<string, unknown>; }
 export function text(value: unknown): string { if (typeof value !== 'string' || !value.length) throw Error('Invalid wallet service response.'); return value; }
 function integer(value: unknown): string { const s = text(value); if (!/^(0|[1-9]\d{0,18})$/.test(s) || BigInt(s) > 9223372036854775807n) throw Error('Invalid exact amount.'); return s; }
@@ -84,7 +96,7 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       if (reviewed.id !== id || reviewed.feeStroops !== q.feeStroops || reviewed.expiresAt !== q.expiresAt || reviewed.feePayer !== q.feePayer) throw Error('Payment preview changed. Review the existing attempt again.');
       const approval = object(raw.approval);
       if (!Number.isSafeInteger(approval.expirationLedger) || Number(approval.expirationLedger) <= 0) throw Error('Invalid authorization expiration.');
-      if (!signer && wallet.approvalMode === 'webauthn') {
+      if (wallet.approvalMode === 'webauthn') {
         const begin = object(await api(`${base}/attempts/${encodeURIComponent(id)}/approval/options`, {}));
         const offered = object(begin.attempt), offeredAttempt = parse(offered);
         const offeredApproval = object(offered.approval);

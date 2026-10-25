@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "schema": "node --import tsx scripts/export-openapi.ts",
     "register-wallet": "node --import tsx scripts/register-testnet-wallet.ts"
+    "wallet:provision": "node --import tsx src/smart-account/provision-cli.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "11.0.0",

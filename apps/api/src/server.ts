@@ -19,6 +19,4 @@ try {
   await shutdown();
   process.exitCode = 1;
 }
-for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-  process.once(signal, () => { void shutdown().catch(() => { process.exitCode = 1; }); });
-}
+
