@@ -1,0 +1,40 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      HOST: "0.0.0.0"
+      WALLET_ORIGIN: http://localhost:5173
+      WEBAUTHN_RP_ID: localhost
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./apps/api/src:/app/src:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
+    environment:
+      NODE_ENV: development
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./apps/web/src:/app/src:ro
+      - ./apps/web/index.html:/app/index.html:ro
+      - ./apps/web/vite.config.ts:/app/vite.config.ts:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
