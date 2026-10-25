@@ -12,4 +12,4 @@ app.post('/api/v1/passkeys/authentication/options',async(request,reply)=>{try{co
 app.post('/api/v1/passkeys/authentication/verify',async(request,reply)=>{try{const {accountID,requestID,response}=request.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Passkey authentication could not be verified'});}});
 // No account discovery, wallet creation or transaction signing until a verified smart-account adapter exists.
 app.setNotFoundHandler((_request,reply)=>reply.code(404).send({error:'Not found'}));
-app.listen({host:'127.0.0.1',port:config.port}).catch(error=>{app.log.error(error);process.exit(1);});
+app.listen({host:process.env.HOST ?? '127.0.0.1',port:config.port}).catch(error=>{app.log.error(error);process.exit(1);});
