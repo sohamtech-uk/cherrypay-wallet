@@ -30,3 +30,11 @@ Status: IN PROGRESS. No smart account deployed, no live transfer authorized. Wal
 - registerPaymentRoutes(app) remains disabled by default (503).
 - No Mainnet configuration, secret keys in source, arbitrary contract calls, or automatic replacement of unknown transfers.
 - Wallet Backend is read-only indexing infrastructure, not spending authorization.
+
+
+## Security gate update
+
+The manifest's legacy account WASM is now explicitly blocked; upstream identifies
+it as predating GHSA-jpg9-m7w4-c7wc. No replacement is automatically approved.
+See [workshop implementation status](WORKSHOP_PHASE_STATUS.md) for the reviewed-code,
+SDK compatibility, approval API, receive-route and live-device acceptance gates.

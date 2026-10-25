@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 const identity = vi.hoisted(() => ({ sessionAccount: vi.fn(), revokeSession: vi.fn() }));
-vi.mock('./store.js', () => ({ ...identity, getCredentials: vi.fn(async () => []) }));
+vi.mock('./store.js', () => ({ ...identity, hashToken: (value: string) => value, getCredentials: vi.fn(async () => []) }));
 import { buildApp } from './app.js';
 import { getConfig } from './config.js';
 import { PaymentService } from './payments/service.js';
@@ -46,3 +46,4 @@ describe('application payment composition', () => {
     finally { await app.close(); }
   });
 });
+

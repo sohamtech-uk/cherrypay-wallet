@@ -72,3 +72,29 @@ describe('authenticated API adapter', () => {
     expect(api.mock.calls.some(([path]) => path.endsWith('/approve'))).toBe(false);
   });
 });
+it('uses begin/finish WebAuthn endpoints only when advertised by the backend',async()=>{
+  const {api,raw}=fixture();
+  api.mockImplementation(async (path)=>{
+    if(path==='wallets/wallet-1') return {...wallet,approvalMode:'webauthn'};
+    if(path.endsWith('/balance')) return {network:'TESTNET',address,snapshot:{amountStroops:'100000000',ledger:90,updatedAt:Date.now()}};
+    if(path.endsWith('/approval/options')) return {requestID:'request-1',attempt:raw,expiresAt:raw.approval.expiresAt,options:{challenge:'a'.repeat(43),rpId:'wallet.example',userVerification:'required',allowCredentials:[{type:'public-key',id:'credential'}]}};
+    if(path.endsWith('/approval/verify')) return {...raw,status:'pending'};
+    return raw;
+  });
+  const assertion={id:'credential',rawId:'credential',type:'public-key' as const,response:{authenticatorData:'AA',clientDataJSON:'AA',signature:'AA'},clientExtensionResults:{}};
+  const authenticate=vi.fn(async()=>assertion);
+  const adapter=await connectPaymentAdapter(api,wallet.id,undefined,authenticate);
+  expect(adapter.canSign).toBe(true);
+  const q=await adapter.prepare(intent,'saved-key');
+  expect((await adapter.approve(q.id,q)).status).toBe('pending');
+  expect(authenticate).toHaveBeenCalledTimes(1);
+  expect(api).toHaveBeenCalledWith('wallets/wallet-1/attempts/attempt-1/approval/verify',{requestID:'request-1',response:assertion});
+  expect(api.mock.calls.some(([path])=>path.endsWith('/approve'))).toBe(false);
+});
+it('refuses a mutated begin-approval response before opening the authenticator',async()=>{
+  const {api,raw}=fixture();
+  const original=api.getMockImplementation()!;
+  api.mockImplementation(async(path,...args)=>path==='wallets/wallet-1'?{...wallet,approvalMode:'webauthn'}:path.endsWith('/approval/options')?{requestID:'request',attempt:{...raw,amountStroops:'2'},expiresAt:raw.approval.expiresAt}:original(path,...args));
+  const authenticate=vi.fn();const adapter=await connectPaymentAdapter(api,wallet.id,undefined,authenticate);
+  const q=await adapter.prepare(intent,'saved-key');await expect(adapter.approve(q.id,q)).rejects.toThrow('differs');expect(authenticate).not.toHaveBeenCalled();
+});

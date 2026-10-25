@@ -29,3 +29,15 @@ describe('authenticated payment API schemas', () => {
     await server.close();
   });
 });
+
+it('advertises approval capability only when configured and fails closed on begin/finish',async()=>{
+  const server=await app();
+  try {
+    expect((await server.inject({url:'/api/v1/wallets/wallet-1'})).json().approvalMode).toBe('external');
+    const created=await server.inject({method:'POST',url:path,headers,payload:intent});const id=created.json().id;
+    const result=await server.inject({method:'POST',url:`${path}/${id}/approval/options`,headers,payload:{}});
+    expect(result.statusCode).toBe(503);expect(result.json().error).toBe('PASSKEY_APPROVAL_NOT_CONFIGURED');
+    const malformed=await server.inject({method:'POST',url:`${path}/${id}/approval/verify`,headers,payload:{requestID:'x',response:{}}});
+    expect(malformed.statusCode).toBe(400);
+  } finally {await server.close();}
+});

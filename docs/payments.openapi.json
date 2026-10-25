@@ -58,6 +58,77 @@
           }
         }
       },
+      "PasskeyAssertion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestID",
+          "response"
+        ],
+        "properties": {
+          "requestID": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "response": {
+            "type": "object",
+            "required": [
+              "id",
+              "rawId",
+              "type",
+              "response",
+              "clientExtensionResults"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "rawId": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "type": {
+                "const": "public-key",
+                "type": "string"
+              },
+              "response": {
+                "type": "object",
+                "required": [
+                  "authenticatorData",
+                  "clientDataJSON",
+                  "signature"
+                ],
+                "properties": {
+                  "authenticatorData": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "clientDataJSON": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "signature": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "userHandle": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                }
+              },
+              "clientExtensionResults": {
+                "type": "object"
+              },
+              "authenticatorAttachment": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "Attempt": {
         "type": "object",
         "required": [
@@ -190,6 +261,31 @@
           },
           "network": {
             "const": "TESTNET"
+          },
+          "approvalMode": {
+            "enum": [
+              "webauthn",
+              "external"
+            ]
+          },
+          "receive": {
+            "type": "object",
+            "required": [
+              "address",
+              "route",
+              "instructions"
+            ],
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "route": {
+                "const": "contract"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            }
           },
           "supportedDestinations": {
             "type": "array",
@@ -874,6 +970,251 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Approval"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Persisted result; pending is not confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attempt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted mutation origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No owned resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting intent, unresolved payment or state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Integration/RPC unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/options": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "attemptId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Begin session-bound transfer approval",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted result; pending is not confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "requestID",
+                    "attempt",
+                    "expiresAt",
+                    "options"
+                  ],
+                  "properties": {
+                    "requestID": {
+                      "type": "string"
+                    },
+                    "attempt": {
+                      "$ref": "#/components/schemas/Attempt"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "options": {
+                      "type": "object",
+                      "description": "WebAuthn options with contract-derived challenge, authorized credentials and required user verification."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No verified session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted mutation origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No owned resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting intent, unresolved payment or state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Integration/RPC unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/verify": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "attemptId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Approve using a one-time transfer-bound WebAuthn assertion",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyAssertion"
               }
             }
           }
