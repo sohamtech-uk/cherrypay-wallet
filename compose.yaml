@@ -27,6 +27,8 @@ services:
       HOST: "0.0.0.0"
       WALLET_ORIGIN: ${WALLET_ORIGIN:-http://localhost:5174}
       WEBAUTHN_RP_ID: localhost
+      AURORA_INTENTS_ENABLED: ${AURORA_INTENTS_ENABLED:-false}
+      AURORA_INTENTS_API_KEY: ${AURORA_INTENTS_API_KEY:-}
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: ${DB_USER:-wallet}
