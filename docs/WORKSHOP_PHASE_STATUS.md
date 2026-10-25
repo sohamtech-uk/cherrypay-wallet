@@ -7,10 +7,10 @@ then A7/B7 acceptance. PostgreSQL supersedes the notes' original MySQL choice.
 | Step | Delivered code | Remaining acceptance |
 | --- | --- | --- |
 | 1 — B3 | PostgreSQL identity/payment records, migrations, session-bound approval tickets, API schemas | Operational database backup/restore and retention |
-| 2 — B4 | Native XLM SAC preparation, exact authorization binding, fee-only relayer, begin/finish WebAuthn approval | Reviewed contract-specific codec and deployment; actual passkey authorization on Testnet |
+| 2 — B4 | Native XLM SAC preparation, exact authorization binding, fee-only relayer, begin/finish WebAuthn approval, source-pinned account codec | Reviewed deployment; actual passkey authorization on Testnet |
 | 3 — B5 | Independent committed-event checks, history, balances, canonical event identity, receive code/TTL verification | Live C→G evidence against the selected account/verifier |
 | 4 — B6 | Persistent idempotency/leases, same-bytes retry, unknown-outcome reconciliation and cursor | Live RPC timeout/restart exercise |
-| 5 — A4–A6 | Authenticated HTTP adapter, explicit receive metadata, fee-limit review, passkey approval, persisted status, indexed history/receipts | Supply the verified B1/B2 adapter and run the browser/Testnet acceptance flow |
+| 5 — A4–A6 | Authenticated HTTP adapter, explicit receive metadata, fee-limit review, passkey approval, persisted status, indexed history/receipts, concrete trusted runtime composition | Supply accepted B1/B2 deployment configuration and run the browser/Testnet acceptance flow |
 | 6 — A7/B7 | Automated negative tests and accessible recovery UI | Independent two-device recovery drill and screen-reader/narrow-screen browser acceptance |
 
 ## Contract selection finding
@@ -23,12 +23,28 @@ identifies it as predating the GHSA-jpg9-m7w4-c7wc fix. This is evidence from up
 source, not a claim that this project has audited a replacement contract.
 The pinned manifest remains historical; its deployment/spending flags stay false.
 
-The current upstream package targets Stellar SDK 16.3.x and supports newer credential
-and digest schemes; this application's tested payment engine is on SDK 14.6.1.
-Do not transplant an encoding recipe or upgrade the SDK untested to bypass this gate.
-Choose and review a patched account and verifier together, pin their reproducible
-artifacts, then test exact authorization encoding and rule selection against those
-contracts. Successful transaction inclusion alone is not deployment provenance.
+The API now pins Stellar SDK 16.3.0 and generated account bindings 0.4.0. The payment
+engine supports address credentials V1 and V2, while rejecting source-account and
+delegated credentials. The browser SDK is unchanged.
+
+The new `PinnedAccountAdapter` targets the OpenZeppelin v0.8.0 structured
+`AuthDigestPreimage`, reviewed at source commit
+`ddc327eb92d63709436da3a8455f641c2d5476c5`, and account WASM
+`c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1`.
+The published npm `smart-account-kit@0.8.0` helper still used a concatenated digest
+when checked; it is deliberately not a dependency. A version label is insufficient
+to choose an authorization scheme. Before offering a challenge, the adapter calls
+the pinned account's pure `auth_digest` helper and compares its result. Tests check
+the Rust struct layout and actual P-256 signature encoding; they do not execute the
+deployed WASM or establish artifact provenance.
+
+Current code bytes, TTL and both signer rules must be read at the same ledger.
+Exactly two permanent Default rules are accepted, each with one separately owned
+P-256 key and no policies. A two-signer rule requiring both signatures is rejected
+as a backup arrangement. Normal sends select the primary rule explicitly. This
+release does not implement a recovery or signer-rotation ceremony; the trusted
+manifest records operator-reviewed deployment and recovery evidence references.
+Successful transaction inclusion alone is not deployment provenance.
 
 ## Begin/finish approval integration
 
@@ -40,6 +56,17 @@ the selected contract's digest scheme. `encode` turns the verified assertion int
 that contract's signature payload, preserving unsigned invocation, nonce and expiry.
 Do not implement these methods using database credential count or arbitrary HTTP
 values. No permissive default codec is supplied.
+
+`createPinnedPaymentRuntime({ accounts, relayerSecret, startLedger })` now returns
+all three dependencies for `buildApp`. Call it only from a trusted server
+composition root after initializing PostgreSQL and accepting deployment/recovery
+evidence. Each manifest item uses the `ApprovedAccount` type; no sample deployment
+addresses or keys are supplied. Existing `wallet_onchain_accounts` rows must match
+the approved owner, wallet ID, address and freshly read policy fingerprint. The
+initial outgoing destination policy must be exactly `['classic']` (C→G). A mismatch
+fails startup without rewriting the stored policy or broadcasting a transaction.
+The default server entry point remains disabled until that explicit composition
+is configured; there is no public provisioning API or automatic deployment.
 
 The API persists a one-use ticket bound to owner, session hash, wallet, attempt,
 request digest, authorization XDR hash, policy, allowed credentials and expiry.
@@ -63,8 +90,9 @@ replacement. Fee labels explicitly say maximum, not actual charged fee.
 
 1. Reviewed/pinned patched account and verifier, source commits, WASM hashes and
    confirmed deployment transactions tied to the created contract addresses.
-2. Current on-chain signer/rule reader and contract-specific assertion codec test
-   vectors for the selected build, including changed nonce/expiry/rules/destination.
+2. Execute the implemented signer/rule reader, digest-helper comparison and
+   assertion codec against that deployed build, including changed
+   nonce/expiry/rules/destination. Local layout/signature tests alone are insufficient.
 3. Dedicated Testnet relayer configuration supplied through secret storage.
 4. Primary and independent backup passkeys enrolled and authorized on-chain; actual
    recovery after losing access to the primary device.

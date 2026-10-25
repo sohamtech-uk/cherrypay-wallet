@@ -1,14 +1,20 @@
 import { Address, Contract, Keypair, Operation, rpc, scValToNative, nativeToScVal, StrKey, Transaction, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 import { amount, NATIVE_SAC, NETWORK, PASSPHRASE, PaymentError, requireThat, validateIntent, type Chain, type Intent, type Outcome, type Prepared, type TransferEvent, type Wallet } from './model.js';
 
+/** V1 and CAP-71 V2 are supported; delegated/source-account authorization is not. */
+export function addressCredentials(credentials: xdr.SorobanCredentials) {
+  if (credentials.switch().name === 'sorobanCredentialsAddress') return credentials.address();
+  if (credentials.switch().name === 'sorobanCredentialsAddressV2') return credentials.addressV2();
+  throw new PaymentError('SOURCE_ACCOUNT_OR_DELEGATED_AUTH_FORBIDDEN');
+}
 export function transferOperation(from: string, to: string, stroops: string) {
   amount(stroops);
   return new Contract(NATIVE_SAC).call('transfer', new Address(from).toScVal(), new Address(to).toScVal(), nativeToScVal(BigInt(stroops), { type: 'i128' }));
 }
 export function assertTransferAuthorization(auth: xdr.SorobanAuthorizationEntry, wallet: Wallet, intent: Intent) {
   const credentials = auth.credentials();
-  requireThat(credentials.switch().name === 'sorobanCredentialsAddress', 'SOURCE_ACCOUNT_AUTH_FORBIDDEN');
-  requireThat(Address.fromScAddress(credentials.address().address()).toString() === wallet.address, 'AUTH_ADDRESS_MISMATCH');
+  addressCredentials(credentials);
+  requireThat(Address.fromScAddress(addressCredentials(credentials).address()).toString() === wallet.address, 'AUTH_ADDRESS_MISMATCH');
   const invocation = auth.rootInvocation();
   requireThat(invocation.subInvocations().length === 0, 'NESTED_AUTH_FORBIDDEN');
   requireThat(invocation.function().switch().name === 'sorobanAuthorizedFunctionTypeContractFn', 'AUTH_FUNCTION_FORBIDDEN');
@@ -20,9 +26,9 @@ export function bindAuthorization(wallet: Wallet, intent: Intent, prepared: Prep
   try { auth = xdr.SorobanAuthorizationEntry.fromXDR(signedAuthXdr, 'base64'); }
   catch { throw new PaymentError('INVALID_AUTH_XDR', 400); }
   assertTransferAuthorization(auth, wallet, intent);
-  requireThat(auth.credentials().address().signature().switch().name !== 'scvVoid', 'SIGNATURE_REQUIRED', 400);
+  requireThat(addressCredentials(auth.credentials()).signature().switch().name !== 'scvVoid', 'SIGNATURE_REQUIRED', 400);
   const unsigned = xdr.SorobanAuthorizationEntry.fromXDR(auth.toXDR('base64'), 'base64');
-  unsigned.credentials().address().signature(xdr.ScVal.scvVoid());
+  addressCredentials(unsigned.credentials()).signature(xdr.ScVal.scvVoid());
   requireThat(unsigned.toXDR('base64') === prepared.authXdr, 'AUTH_NONCE_EXPIRY_OR_INVOCATION_CHANGED', 400);
   const envelope = xdr.TransactionEnvelope.fromXDR(prepared.transactionXdr, 'base64');
   requireThat(envelope.switch().name === 'envelopeTypeTx', 'INVALID_PREPARED_ENVELOPE');
@@ -95,8 +101,8 @@ export class StellarChain implements Chain {
     requireThat(simulation.result.auth.length === 1, 'UNEXPECTED_AUTHORIZATION_COUNT');
     const auth = simulation.result.auth[0]; assertTransferAuthorization(auth, wallet, intent);
     const expirationLedger = simulation.latestLedger + 30;
-    auth.credentials().address().signatureExpirationLedger(expirationLedger);
-    auth.credentials().address().signature(xdr.ScVal.scvVoid());
+    addressCredentials(auth.credentials()).signatureExpirationLedger(expirationLedger);
+    addressCredentials(auth.credentials()).signature(xdr.ScVal.scvVoid());
     const assembled = rpc.assembleTransaction(tx, simulation).build();
     requireThat(BigInt(assembled.fee) <= amount(intent.maxFeeStroops), 'FEE_CAP_EXCEEDED');
     return { transactionXdr: assembled.toXDR(), authXdr: auth.toXDR('base64'), feeStroops: intent.maxFeeStroops,
@@ -141,3 +147,4 @@ export class StellarChain implements Chain {
     return { events, cursor: result.cursor };
   }
 }
+
