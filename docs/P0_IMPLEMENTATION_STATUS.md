@@ -2,8 +2,8 @@
 
 ## Implemented in PR #14
 - Server-generated account IDs and WebAuthn user IDs; RP ID, origin and user-verification enforcement.
-- PostgreSQL persistence of accounts, credentials, one-time expiring challenges and hashed bearer sessions.
-- Initial enrollment uses a per-account PostgreSQL `SELECT ... FOR UPDATE` lock. Two simultaneous first-enrollment verifications cannot register competing credentials.
+- MySQL InnoDB persistence of accounts, credentials, one-time expiring challenges and hashed bearer sessions.
+- Initial enrollment uses a per-account MySQL InnoDB `SELECT ... FOR UPDATE` lock. Two simultaneous first-enrollment verifications cannot register competing credentials.
 - Backup credential enrollment requires an authenticated session for the same account. Enrollment options and verification bind the session token hash to the challenge.
 - Authentication verifies the stored credential and updates its signature counter inside the same account-locked transaction. Concurrent authentications serialize; counter rollback fails.
 - Basic per-IP, per-endpoint development rate limiting (10 requests per minute per process).
@@ -19,3 +19,5 @@
 - **No Stellar smart-account deployment, on-chain WebAuthn authorization, on-chain backup signer or independent recovery exists yet.** Do not represent backup-passkey enrollment as on-chain recovery.
 
 This PR must remain draft until typecheck, Docker integration tests and a security review pass.
+
+MySQL 8.4 replaces PostgreSQL for local development. Previous PostgreSQL volumes are not automatically migrated. Validate Docker startup, API typecheck, and concurrency tests before merge.
