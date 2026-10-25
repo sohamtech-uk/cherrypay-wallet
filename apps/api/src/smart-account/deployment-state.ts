@@ -51,7 +51,8 @@ export class DeploymentStateStore {
       if(['CONFIRMED','VERIFYING','ACTIVE'].includes(next) && !address) throw Error('CONTRACT_ADDRESS_REQUIRED');
       // ACTIVE must be gated by independent on-chain verifier; never transition via generic state-store API.
       if(next==='ACTIVE') throw Error('VERIFIED_ACTIVATION_REQUIRED');
-      if(next==='RETRYABLE_FAILURE' && hash) throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');\n      const retry=next==='RETRYABLE_FAILURE';
+      if(next==='RETRYABLE_FAILURE' && hash) throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');
+      const retry=next==='RETRYABLE_FAILURE';
       await client.query(`UPDATE wallet_deployment_jobs SET status=$3,transaction_hash=$4,contract_address=$5,
         failure_code=$6,retry_after=CASE WHEN $7::int IS NULL THEN NULL ELSE NOW()+($7::int * INTERVAL '1 second') END,
         lease_token=CASE WHEN $8 THEN NULL ELSE lease_token END,
