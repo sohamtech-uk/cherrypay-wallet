@@ -1,0 +1,55 @@
+name: Wallet Azure production images
+on:
+  pull_request:
+    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
+  push:
+    branches: [develop]
+    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate Azure template
+        run: az bicep build --file infra/azure/wallet.bicep --outfile /tmp/wallet-arm.json
+      - name: Production container smoke test
+        run: bash scripts/test-production-containers.sh
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    needs: containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure-wallet-testnet
+    concurrency:
+      group: azure-wallet-testnet
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy wallet bootstrap with payments disabled
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
+          AZURE_CONTAINER_ENVIRONMENT_ID: ${{ vars.AZURE_CONTAINER_ENVIRONMENT_ID }}
+          AZURE_REGISTRY_IDENTITY_ID: ${{ vars.AZURE_REGISTRY_IDENTITY_ID }}
+          AZURE_CONTAINER_REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+          WALLET_DATABASE_URL: ${{ secrets.WALLET_DATABASE_URL }}
+        run: bash infra/azure/deploy.sh

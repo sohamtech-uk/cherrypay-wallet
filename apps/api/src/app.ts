@@ -7,15 +7,16 @@ import { registerPaymentRoutes } from './payments/routes.js';
 import Fastify from 'fastify';
 import {getConfig} from './config.js';
 import {beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
-import {sessionAccount,hashToken,getCredentials,revokeSession} from './store.js';
-export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean } = {}) {
-const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
+import {sessionAccount,hashToken,getCredentials,revokeSession,db} from './store.js';
+export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
+const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,trustProxy:'loopback',bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
 const token=(h:string|undefined)=>h?.startsWith('Bearer ')?h.slice(7):undefined;
 const attempts=new Map<string,{count:number;reset:number}>();
 function limited(ip:string,route:string){const key=ip+':'+route,now=Date.now(),old=attempts.get(key);if(!old||old.reset<=now){attempts.set(key,{count:1,reset:now+60_000});return false;}old.count++;return old.count>10;}
 
 app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==config.origin)return reply.code(403).send({error:'Untrusted origin'});if(req.method==='POST'&&req.url.startsWith('/api/v1/passkeys/')&&limited(req.ip,req.url))return reply.code(429).send({error:'Too many attempts'});});
 app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:false}));
+app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:false}));
 app.post('/api/v1/passkeys/registration/options',async(req,reply)=>{try{const id=(req.body as {accountID?:string}|undefined)?.accountID,t=token(req.headers.authorization);if(id&&await sessionAccount(t)!==id)return reply.code(403).send({error:'Authentication required'});return await beginRegistration(config.rpID,id,id?t:undefined);}catch{return reply.code(400).send({error:'Cannot start enrollment'});}});
 app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});return await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);}catch{return reply.code(400).send({error:'Cannot verify enrollment'});}});

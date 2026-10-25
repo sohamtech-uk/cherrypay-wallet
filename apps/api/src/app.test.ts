@@ -17,6 +17,28 @@ function payments() {
   return service;
 }
 describe('application payment composition', () => {
+  it('separates database readiness from process liveness and redacts failures', async () => {
+    const checkDatabase=vi.fn().mockResolvedValue(undefined);
+    const app=await buildApp({config,logger:false,checkDatabase});
+    try {
+      expect((await app.inject({url:'/ready'})).statusCode).toBe(200);
+      checkDatabase.mockRejectedValue(Error('postgres://private:secret@database'));
+      const result=await app.inject({url:'/ready'});
+      expect(result.statusCode).toBe(503);
+      expect(result.json()).toEqual({status:'unavailable'});
+      expect((await app.inject({url:'/health'})).statusCode).toBe(200);
+      checkDatabase.mockResolvedValue(undefined);
+      expect((await app.inject({url:'/ready'})).statusCode).toBe(200);
+    } finally { await app.close(); }
+  });
+  it('trusts forwarded client addresses only from the local reverse proxy', async () => {
+    const app=await buildApp({config,logger:false});
+    app.get('/test-ip',async req=>({ip:req.ip}));
+    try {
+      expect((await app.inject({url:'/test-ip',remoteAddress:'127.0.0.1',headers:{'x-forwarded-for':'192.0.2.1'}})).json().ip).toBe('192.0.2.1');
+      expect((await app.inject({url:'/test-ip',remoteAddress:'192.0.2.2',headers:{'x-forwarded-for':'192.0.2.1'}})).json().ip).toBe('192.0.2.2');
+    } finally { await app.close(); }
+  });
   it('keeps payment endpoints disabled by default', async () => {
     const app = await buildApp({ config, logger: false });
     try { expect((await app.inject({ url: path })).statusCode).toBe(503); expect(identity.sessionAccount).not.toHaveBeenCalled(); }
