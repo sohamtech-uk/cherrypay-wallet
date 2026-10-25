@@ -15,7 +15,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const generation = useRef(0);
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(savedAccountId);
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -77,7 +77,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   }
   async function connect(event: React.FormEvent) {
     event.preventDefault(); if (lock.current) return;
-    const id = ++generation.current, owner = accountId.trim(); lock.current = true; setBusy(true); setError(''); setNotice('');
+    const id = ++generation.current, owner = email.trim().toLowerCase(); lock.current = true; setBusy(true); setError(''); setNotice('');
     const api = apiClient(() => undefined);
     try {
       const challenge = object(await api('passkeys/authentication/options', { accountID: owner }));
@@ -96,7 +96,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     const api = apiClient(() => token.current);
     let verifying = false;
     try {
-      const challenge = object(await api('passkeys/registration/options', additional ? { accountID: accountId } : {}));
+      const challenge = object(await api('passkeys/registration/options', additional ? { accountID: accountId } : { email: email.trim().toLowerCase() }));
       if (generation.current !== id) return;
       const owner = text(challenge.accountID);
       if (additional && owner !== accountId) throw Error('Enrollment account changed. Reconnect before trying again.');
@@ -144,7 +144,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   }
   return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
     <h2>{authenticated ? 'Your passkey profile' : 'Connect or create a passkey profile'}</h2>
-    <p>Use your account ID and passkey to find your linked Testnet wallets. Creating a profile does not deploy or fund a wallet.</p>
+    <p>Use your email address as your Account ID and sign in with your passkey. Creating a profile does not deploy or fund a wallet.</p>
     {authenticated ? <>
       <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
@@ -154,8 +154,8 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
     </> : <>
-      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Account ID (legacy sign-in)</label><input id="account-id" value={accountId} onChange={e => setAccountId(e.target.value)} required autoComplete="off"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
-      <label htmlFor="wallet-email">Email address</label><input id="wallet-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" disabled={busy}/><p>Email verification is not yet connected to account enrollment. Continue with account ID and passkey until the secure email flow is enabled.</p><button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
+      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Email address (Account ID)</label><input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
+      <button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
       <p>New here? Create a profile, save its account ID, then add another passkey. Your device manages the passkeys.</p>
     </>}
     {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
