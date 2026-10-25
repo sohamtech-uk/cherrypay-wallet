@@ -9,24 +9,24 @@ The default server registers payment routes but returns **503 PAYMENT_INTEGRATIO
 ## Files and integration
 
 - `src/payments/model.ts`: frontend-facing types, exact stroop validation, Testnet/native SAC identity and public response mapping.
-- `repository.ts`: asynchronous MySQL repository contract and reusable immutable-record/status/event validation. Sunil implements the persistence layer; this PR does not create a competing database.
+- `repository.ts`: asynchronous PostgreSQL repository contract and reusable immutable-record/status/event validation. Sunil maintains the persistence layer; this PR does not create a competing database.
 - `stellar.ts`: native SAC `transfer(from,to,amount)` construction, recording/enforced simulation, signature-only authorization binding, fee sponsor signing, hash/event verification and balance/event reads.
 - `service.ts`: persistence before network writes, policy checks, retries and monitoring.
 - `routes.ts`: Fastify request schemas and owner-scoped endpoints. `docs/payments.openapi.json` is the public API contract.
-- `runtime.ts`: Testnet RPC/relayer composition with an injected MySQL repository. `worker.ts`: non-overlapping background monitor.
+- `runtime.ts`: Testnet RPC/relayer composition with an injected PostgreSQL repository. `worker.ts`: non-overlapping background monitor.
 
-Use Node **22+** (tested on Node 24). **MySQL is the backend database, implemented by Sunil.** See [MYSQL_PAYMENT_CONTRACT.md](MYSQL_PAYMENT_CONTRACT.md) for the interface, proposed record layout and required InnoDB transaction/locking behavior. No SQLite dependency, SQLite schema, alternative production store or automatic migration is included. The in-memory test double is never used by the running server.
+Use Node **22+** (tested on Node 24). **PostgreSQL is the backend database, implemented by Sunil.** See [POSTGRESQL_PAYMENT_CONTRACT.md](POSTGRESQL_PAYMENT_CONTRACT.md) for the interface, proposed record layout and required PostgreSQL row-level transaction/locking behavior. Versioned PostgreSQL migrations are implemented for identity and payment persistence. The in-memory test double is never used by the running server.
 
 The integration composition root must:
 
 1. Create a dedicated **Testnet fee sponsor** via secret management. Do not reuse a customer account or share this account with another application. Never log the secret or signed authorization payloads.
 2. Implement `PolicyReader.current(address)` using the selected B1/B2 contract's actual on-chain signer/recovery state. Return a canonical fingerprint that changes for any signer, threshold, recovery, upgrade or policy change. Return recoveryReady only after the independent recovery gate is satisfied.
 3. Call `createPaymentRuntime({ repository, relayerSecret, policyReader, startLedger })`. The RPC URL and network passphrase are Testnet-only. Set startLedger to a recorded wallet deployment/backfill ledger, not an arbitrary current ledger that would skip history.
-4. Provision wallet records through Sunil’s MySQL adapter from a trusted B1/B2 deployment flow after verifying ownership and independent recovery. This is intentionally not a public HTTP endpoint. Enable only Testnet destination routes actually validated in B1.
+4. Provision wallet records through Sunil’s PostgreSQL adapter from a trusted B1/B2 deployment flow after verifying ownership and independent recovery. This is intentionally not a public HTTP endpoint. Enable only Testnet destination routes actually validated in B1.
 5. Call `registerPaymentRoutes(app, { service, origin, authenticate })`. `authenticate` must verify a real server-side session and return the owner subject; never trust accountID or a caller-provided owner header. Mutations require exact Origin. Configure Fastify with `ajv.customOptions = { removeAdditional: false, coerceTypes: false }`, as the default server does.
-6. Start `startPaymentWorker(service, onError)` and stop it on shutdown, then close the MySQL pool after in-flight work completes. Monitoring errors expose only a generic operational code; alert on persistent failure, unknown attempts or cursor/backfill gaps.
+6. Start `startPaymentWorker(service, onError)` and stop it on shutdown, then close the PostgreSQL pool after in-flight work completes. Monitoring errors expose only a generic operational code; alert on persistent failure, unknown attempts or cursor/backfill gaps.
 
-Do not connect the development-only passkey endpoints to wallet provisioning or payment authentication. Sunil’s P0 branch migrates accounts, credentials, challenges and bearer sessions to MySQL. This PR leaves those files and migrations to him and supplies the payment repository contract for the same backend.
+Do not connect the development-only passkey endpoints to wallet provisioning or payment authentication. Sunil’s P0 branch migrates accounts, credentials, challenges and bearer sessions to PostgreSQL. The identity and payment schemas now live together in the application PostgreSQL database.
 
 ## Frontend adapter handoff
 
@@ -46,7 +46,7 @@ The sponsor pays fees; the customer amount is unchanged. `feeStroops` in the pre
 
 An idempotency key is unique within a wallet. Reuse with another intent returns 409; reuse with the same intent returns the original immutable attempt, including after restart. Identity/digest/source and any persisted signed envelope/hash cannot be changed.
 
-For this MVP, the repository contract requires a transactional MySQL relayer reservation allowing **one unresolved attempt across the dedicated relayer**, including unsigned previews. This deliberately serializes sequence use across wallets and processes. Cancel or expire unused previews to release the slot. Scale via a reviewed relayer queue/pool later; never share the relayer outside this database.
+For this MVP, the repository contract requires a transactional PostgreSQL relayer reservation allowing **one unresolved attempt across the dedicated relayer**, including unsigned previews. This deliberately serializes sequence use across wallets and processes. Cancel or expire unused previews to release the slot. Scale via a reviewed relayer queue/pool later; never share the relayer outside this database.
 
 State progression:
 
@@ -72,13 +72,13 @@ History includes sent and received verified events. Attempts are separately list
 
 ## Verification and remaining gates
 
-Run `npm ci`, `npm run typecheck`, `npm test` in `apps/api`. Tests exercise the asynchronous repository contract using an in-memory test double, service reconstruction/recovery sequencing, leases, exact XDR construction/binding, SDK signature verification, mocked RPC behavior, event identity, schemas and owner isolation. MySQL durability, cross-process locking and real database restart tests remain Sunil’s integration responsibility. Mocked contract simulation is not evidence that a particular deployed smart account accepts passkeys.
+Run `npm ci`, `npm run typecheck`, `npm test` in `apps/api`. Tests exercise the asynchronous repository contract using an in-memory test double, service reconstruction/recovery sequencing, leases, exact XDR construction/binding, SDK signature verification, mocked RPC behavior, event identity, schemas and owner isolation. PostgreSQL durability, cross-process locking and real database restart tests remain Sunil’s integration responsibility. Mocked contract simulation is not evidence that a particular deployed smart account accepts passkeys.
 
-Before enabling spending: validate B1/B2 deployment/recovery, provide the MySQL repository, on-chain policy reader and secure session adapter, and demonstrate real Testnet create → authorize → send → verify → restart/recover. Test RPC retention gaps, contract TTL restoration policy, sponsor funding, rate limits, deployment secret/storage controls and monitoring in that environment. No funds were moved or contracts deployed by this PR.
+Before enabling spending: validate B1/B2 deployment/recovery, provide the PostgreSQL repository, on-chain policy reader and secure session adapter, and demonstrate real Testnet create → authorize → send → verify → restart/recover. Test RPC retention gaps, contract TTL restoration policy, sponsor funding, rate limits, deployment secret/storage controls and monitoring in that environment. No funds were moved or contracts deployed by this PR.
 
 Dependency repairs: the original `@simplewebauthn/server@11.0.1` pin is not published; use 11.0.0 with its separately exported types package. Stellar SDK is pinned to 14.6.1 for explicit simulation authMode and current committed-event support. A lockfile is included. WebAuthn runtime logic is unchanged.
 
-Rollback: disable composition/payment routes/worker and revert this PR. Preserve the MySQL payment records and reconcile all pending/unknown signed transactions before any replacement rollout. Never delete the database to clear a pending attempt.
+Rollback: disable composition/payment routes/worker and revert this PR. Preserve the PostgreSQL payment records and reconcile all pending/unknown signed transactions before any replacement rollout. Never delete the database to clear a pending attempt.
 
 ## Primary references
 

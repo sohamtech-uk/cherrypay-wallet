@@ -1,30 +1,23 @@
-# P0 secure passkey enrollment — implementation and validation status
+# Passkey identity — PostgreSQL foundation status
 
-## Implemented in PR #14
-- Server-generated account IDs and WebAuthn user IDs; RP ID, origin and user-verification enforcement.
-- MySQL InnoDB persistence of accounts, credentials, one-time expiring challenges and hashed bearer sessions.
-- Initial enrollment uses a per-account MySQL InnoDB `SELECT ... FOR UPDATE` lock. Two simultaneous first-enrollment verifications cannot register competing credentials.
-- Backup credential enrollment requires an authenticated session for the same account. Enrollment options and verification bind the session token hash to the challenge.
-- Authentication verifies the stored credential and updates its signature counter inside the same account-locked transaction. Concurrent authentications serialize; counter rollback fails.
-- Basic per-IP, per-endpoint development rate limiting (10 requests per minute per process).
-- Wallet deployment remains disabled; Stellar network is Testnet only.
+## Implemented
 
-## Remaining verification and production gates
-- **No tests/builds have been executed against this branch yet.** Test real passkey enrollment, backup enrollment, replay, parallel enrollment and authentication, session expiry and restart persistence.
-- Per-process rate limiting is not sufficient for multi-replica deployments; replace with shared Redis/DB-backed rate limiting and an ingress-level policy.
-- Replace ad-hoc schema creation with versioned migrations, establish DB credentials/rotation and encrypted backup policies, and add audited events.
-- The API currently returns bearer tokens to the frontend. Define a hardened BFF/session storage strategy before production; do not store tokens in localStorage.
-- Initial account creation can leave abandoned rows; add expiry/garbage collection. Authentication still uses a known account ID rather than discoverable credentials.
-- Review challenge consumption semantics for failed verifications, denial-of-service resistance, security response headers and dependency audit.
-- **No Stellar smart-account deployment, on-chain WebAuthn authorization, on-chain backup signer or independent recovery exists yet.** Do not represent backup-passkey enrollment as on-chain recovery.
+- Server-generated account IDs and WebAuthn user IDs; verified relying-party hostname/origin and user verification.
+- PostgreSQL-backed credentials, hashed sessions and expiring one-time challenges with `wallet_*` tables.
+- Row-level `SELECT ... FOR UPDATE` account locks serialize initial enrollment and authentication counter updates.
+- Backup enrollment requires the account's authenticated session; its challenge is bound to the session hash.
+- One-time challenge rows are consumed transactionally; session revocation is persistent.
+- Development-only process-local per-IP rate limiting (10 requests per minute); not adequate at scale.
+- Testnet-only configuration; wallet deployment remains disabled.
 
-This PR must remain draft until typecheck, Docker integration tests and a security review pass.
+## Remaining security and acceptance gates
 
-MySQL 8.4 replaces PostgreSQL for local development. Previous PostgreSQL volumes are not automatically migrated. Validate Docker startup, API typecheck, and concurrency tests before merge.
+- CI PostgreSQL integration tests must pass; additionally test real browser passkeys, account discovery, cross-device recovery, replay and parallel authentication.
+- Implement shared/ingress rate limiting, session-cookie hardening, audit records, operational retention/cleanup and backup/restore policies.
+- A passkey registered in PostgreSQL **does not establish an on-chain owner or signer policy**. Independently validate smart-account contract deployment, transaction-bound signature authorization, backup signer and recovery.
+- Payment HTTP endpoints return 503 until secure signer/policy/runtime wiring passes B1/B2 gates.
+- Any future schema changes require *new* migration files. Applied migration SHA-256 changes fail startup.
 
-## Conditional startup SQL
-- The API reads `apps/api/sql/001_wallet_schema.sql` on startup. Dockerfile copies this file into the API image.
-- It queries `information_schema.TABLES` for the four wallet tables and skips DDL if all exist; otherwise it runs `CREATE TABLE IF NOT EXISTS` statements.
-- The dedicated `DB_NAME` database must already exist and be accessible. Startup does not create databases or modify Cherry Money's existing schema.
-- This is bootstrap-only schema creation, not a versioned migration system: existing tables are not altered, and future schema changes require migrations.
-- Verify first startup, repeated startup, partial schema and missing database behavior locally. No Docker/MySQL integration tests have been run in this session.
+## Migration
+
+No existing MySQL data exists, per project owner. PR #16 replaces the unused MySQL implementation with a fresh PostgreSQL 17 database. No export/import or dual-write mechanism is needed.

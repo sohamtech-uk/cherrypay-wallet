@@ -105,8 +105,9 @@ export class PostgresPaymentRepository implements PaymentRepository {
         requireThat(prior[0].request_digest===digest(intent),'IDEMPOTENCY_CONFLICT');
         return attemptOf(prior[0]);
       }
-      const {rows:owned}=await client.query('SELECT id FROM wallet_onchain_accounts WHERE id=$1 AND owner=$2 AND network=$3 FOR UPDATE',[wallet.id,wallet.owner,'TESTNET']);
+      const {rows:owned}=await client.query('SELECT id,address,policy FROM wallet_onchain_accounts WHERE id=$1 AND owner=$2 AND network=$3 FOR UPDATE',[wallet.id,wallet.owner,'TESTNET']);
       requireThat(owned.length===1,'WALLET_NOT_FOUND',404);
+      requireThat(owned[0].address===wallet.address && owned[0].policy===wallet.policy,'WALLET_METADATA_CHANGED');
       requireThat(!locked[0].attempt_id,'RELAYER_BUSY_RESOLVE_EXISTING_ATTEMPT');
       const now=Date.now();
       const a:Attempt={
