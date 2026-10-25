@@ -15,6 +15,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const generation = useRef(0);
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
+  const [email, setEmail] = useState('');
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -147,13 +148,14 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     {authenticated ? <>
       <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
+      <p>Account email association will be available after server-side verification is enabled.</p>
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <p role="status">No deployed wallet is linked to this account yet. Share your account ID with the Testnet pilot operator to complete wallet activation, then reconnect.</p> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       <p>For recovery preparation, add a passkey on another device or security key. Enrollment alone does not prove independent recovery or update on-chain signers.</p>
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
     </> : <>
-      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Account ID</label><input id="account-id" value={accountId} onChange={e => setAccountId(e.target.value)} required autoComplete="off"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
-      <button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
+      <form onSubmit={e => void connect(e)}><fieldset disabled={busy}><label htmlFor="account-id">Account ID (legacy sign-in)</label><input id="account-id" value={accountId} onChange={e => setAccountId(e.target.value)} required autoComplete="off"/><button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button></fieldset></form>
+      <label htmlFor="wallet-email">Email address</label><input id="wallet-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" disabled={busy}/><p>Email verification is not yet connected to account enrollment. Continue with account ID and passkey until the secure email flow is enabled.</p><button className="secondary-button" disabled={busy} onClick={() => void register(false)}>Create passkey profile</button>
       <p>New here? Create a profile, save its account ID, then add another passkey. Your device manages the passkeys.</p>
     </>}
     {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
