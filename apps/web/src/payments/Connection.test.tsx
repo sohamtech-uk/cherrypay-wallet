@@ -17,6 +17,7 @@ function fixture(items:unknown[]=[row],seconds=1800) {
     if(url.endsWith('/options'))return response({accountID:'alice@example.com',requestID:'challenge',options:{challenge:'challenge'}});
     if(url.endsWith('/verify'))return response({verified:true,accountID:'alice@example.com',token:'secret-session',expiresInSeconds:seconds,credentialCount:1});
     if(url.endsWith('/wallets'))return response({network:'TESTNET',items});
+    if(url.endsWith('/smart-account/deployment'))return new Response(JSON.stringify({status:'PENDING',address:null,transactionHash:null,deploymentEnabled:false,nextAction:'PASSKEY_CONTROLLED_DEPLOYMENT_NOT_YET_CONFIGURED'}),{status:202});
     if(url.endsWith('/balance'))return response({network:'TESTNET',address:url.includes('wallet-2')?other:address,snapshot:null});
     if(url.endsWith('/logout'))return new Response(null,{status:204});
     return response({...row,id:url.endsWith('wallet-2')?'wallet-2':row.id,address:url.endsWith('wallet-2')?other:address,supportedDestinations:['classic']});
@@ -35,6 +36,7 @@ it('discovers the owned wallet after passkey login without asking for a wallet I
   expect(startAuthentication).toHaveBeenCalledWith({optionsJSON:{challenge:'challenge'}});
   expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address,canSign:false}));expect(local).not.toHaveBeenCalled();
   expect(fetcher).toHaveBeenCalledWith('/api/v1/wallets',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
+  expect(fetcher.mock.calls.some(([url])=>url.endsWith('/smart-account/deployment'))).toBe(false);
   await user.click(screen.getByRole('button',{name:'Disconnect wallet'}));
   await screen.findByRole('button',{name:'Connect with passkey'});expect(onConnect).toHaveBeenLastCalledWith(null);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/session/logout',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
@@ -46,8 +48,12 @@ it('requires a selection when multiple owned wallets exist and opens only that w
   await screen.findByText(/Wallet connected/);expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address:other}));
 });
 it('shows an explicit setup state for an account without deployed wallets',async()=>{
-  fixture([]);const onConnect=vi.fn(),user=userEvent.setup();render(<PaymentConnection onConnect={onConnect}/>);
-  await signIn(user);await screen.findByText(/No deployed wallet is linked/);expect(onConnect).not.toHaveBeenCalled();
+  const fetcher=fixture([]);const onConnect=vi.fn(),user=userEvent.setup();render(<PaymentConnection onConnect={onConnect}/>);
+  await signIn(user);await screen.findByText(/No deployed C-address wallet is linked/);expect(onConnect).not.toHaveBeenCalled();
+  expect(screen.getByText(/Provisioning status: PENDING/)).toBeTruthy();
+  expect(screen.getByText(/Deployment status has not been verified/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetcher).toHaveBeenCalledWith('/api/v1/smart-account/deployment',expect.objectContaining({method:'POST',body:'{}',headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
   expect(screen.getByRole('button',{name:'Disconnect wallet'})).toBeTruthy();
 });
 it('does not connect or discover wallets when passkey verification fails',async()=>{
@@ -85,7 +91,7 @@ it('creates a profile once, saves only its public ID before the ceremony and dis
   expect(fetcher.mock.calls.filter(([url])=>url.endsWith('/registration/verify'))).toHaveLength(1);
   expect(storage.mock.calls).toEqual([['cherrypay:testnet:account-id','alice@example.com']]);
   expect(screen.getByLabelText(/(?:Email address \(Account ID\)|Account ID)/)).toHaveProperty('value','alice@example.com');
-  expect(screen.getByText(/No deployed wallet is linked/)).toBeTruthy();
+  expect(screen.getByText(/No deployed C-address wallet is linked/)).toBeTruthy();
 });
 it('keeps the account ID after an interrupted initial verification so sign-in can recover it',async()=>{
   const fetcher=fixture([]),original=fetcher.getMockImplementation()!;

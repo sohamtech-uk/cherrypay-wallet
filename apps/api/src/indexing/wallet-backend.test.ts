@@ -27,3 +27,17 @@ describe('read-only Stellar Wallet Backend adapter', () => {
     expect(()=>new WalletBackendClient('http://remote.example/graphql/query')).toThrow('INVALID_INDEXER_ENDPOINT');
   });
 });
+
+it('signs the exact request bytes using a short-lived, request-bound key', async () => {
+  const { indexerToken } = await import('./wallet-backend.js');
+  const key=Keypair.random(), body='{"query":"{ accountByAddress { address } }"}';
+  const token=indexerToken(key,body,1234), [header,payload,signature]=token.split('.');
+  expect(JSON.parse(Buffer.from(header,'base64url').toString())).toEqual({alg:'EdDSA',typ:'JWT'});
+  expect(JSON.parse(Buffer.from(payload,'base64url').toString())).toMatchObject({iat:1234,exp:1244,sub:key.publicKey(),methodAndPath:'POST /graphql/query'});
+  expect(key.verify(Buffer.from(`${header}.${payload}`),Buffer.from(signature,'base64url'))).toBe(true);
+  expect(indexerToken(key,body+' ',1234)).not.toBe(token);
+});
+it('bounds the response body before parsing it',async()=>{
+  const client=new WalletBackendClient('http://localhost:8001/graphql/query',async()=>new Response(' '.repeat(262145)));
+  await expect(client.account(Keypair.random().publicKey())).rejects.toThrow('INDEXER_RESPONSE_TOO_LARGE');
+});
