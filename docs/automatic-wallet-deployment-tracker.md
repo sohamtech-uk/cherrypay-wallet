@@ -6,7 +6,7 @@ Never enable spending or report ACTIVE without independent on-chain verification
 
 | Order | Deliverable | Status | Acceptance gate |
 | --- | --- | --- | --- |
-| 1 | Stellar transaction builder, pinned v0.8.0 | IN PROGRESS | Deterministic contract ID, exact initialization ABI, two independent P-256 signers, signed XDR and hash verified against SDK; simulation and fee checks |
+| 1 | Stellar transaction builder, pinned v0.8.0 | IN PROGRESS | Deterministic contract ID, exact initialization ABI, two independent P-256 signers, signed XDR and hash verified against SDK; simulation and fee checks (XDR/hash validation added; builder pending) |
 | 2 | Actual RPC submission | PARTIAL | Existing `PinnedV080DeploymentAdapter.broadcast`; validate signed hash, reject network mismatch, preserve durable intent before sending, classify uncertain outcomes |
 | 3 | Automatic reconciliation worker | NOT STARTED | Restart-safe scan of SUBMITTED/expired DEPLOYING; reconcile before any retry; fencing and backoff; transaction/ledger proof |
 | 4 | Independent two-signer verification | PARTIAL | Existing `PinnedAccountAdapter.current` checks pinned WASM and two rules; trusted approval evidence and recovery transaction verification required |
@@ -28,4 +28,4 @@ Never enable spending or report ACTIVE without independent on-chain verification
 
 ## Verification log
 - Previous user report: TypeScript typecheck passed; 184 tests passed, 27 skipped, prior to subsequent adapter changes.
-- Changes after that report are **not yet verified**.
+- Changes after that report are **not yet verified**.\n- 2026-10-25: Step 1 security prerequisite committed: reject malformed/unsigned XDR and mismatched transaction hashes before writing deployment intent. Exact v0.8.0 deployment transaction construction remains pending.
