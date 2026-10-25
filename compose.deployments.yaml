@@ -1,0 +1,10 @@
+# Explicit opt-in for LOCAL Testnet contract creation; never auto-loaded by Compose.
+# Inject secrets via a private environment file or secret manager, never source control.
+services:
+  api:
+    environment:
+      WALLET_DEPLOYMENTS_ENABLED: "true"
+      STELLAR_DEPLOYER_SECRET: ${STELLAR_DEPLOYER_SECRET:?Inject the dedicated Testnet deployer secret}
+      STELLAR_DEPLOYER_PUBLIC_KEY: ${STELLAR_DEPLOYER_PUBLIC_KEY:?Set the matching public G-address}
+      WALLET_DEPLOYMENT_MAX_FEE_STROOPS: ${WALLET_DEPLOYMENT_MAX_FEE_STROOPS:-100000000}
+      WALLET_DEPLOYMENT_PILOT_LIMIT: ${WALLET_DEPLOYMENT_PILOT_LIMIT:-100}

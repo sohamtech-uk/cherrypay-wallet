@@ -31,7 +31,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   },30_000);
   it('applies identity, payment and deployment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','009_wallet_deployment_jobs.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql']);
   });
   it('reserves one deployment per authenticated owner without deploying or resetting its state',async()=>{
     const owner=await createAccount(),other=await createAccount();
@@ -48,7 +48,8 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const responses=await Promise.all([app.inject({method:'POST',url,headers,payload:{}}),app.inject({method:'POST',url,headers,payload:{}})]);
       for(const result of responses) {
         expect(result.statusCode).toBe(202);
-        expect(result.json()).toMatchObject({status:'PENDING',address:null,transactionHash:null,deploymentEnabled:false});
+        expect(result.json()).toMatchObject({status:'AWAITING_PASSKEY',deploymentEnabled:false});
+        expect(result.json().address??null).toBeNull();expect(result.json().transactionHash??null).toBeNull();
       }
       expect((await db.query('SELECT count(*)::int AS count FROM wallet_deployment_jobs WHERE account_id=$1',[owner.id])).rows[0].count).toBe(1);
       await db.query("UPDATE wallet_deployment_jobs SET status='AWAITING_PASSKEY' WHERE account_id=$1",[owner.id]);
@@ -94,7 +95,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       const enrolled=await post('passkeys/registration/verify',{accountID:initial.accountID,requestID:initial.requestID,response:primary.registration(initial.options.challenge)});
       expect(enrolled.statusCode).toBe(200);const first=enrolled.json();
       expect(first).toMatchObject({verified:true,credentialCount:1,recoveryReady:false});
-      expect((await db.query('SELECT status FROM wallet_deployment_jobs WHERE account_id=$1',[first.accountID])).rows).toEqual([{status:'PENDING'}]);
+      expect((await db.query('SELECT status FROM wallet_deployment_jobs WHERE account_id=$1',[first.accountID])).rows).toEqual([{status:'AWAITING_PASSKEY'}]);
       expect((await post('passkeys/registration/options',{accountID:first.accountID})).statusCode).toBe(403);
       const second=(await post('passkeys/registration/options',{accountID:first.accountID},first.token)).json();
       expect(second.options.excludeCredentials.map((c:{id:string})=>c.id)).toContain(primary.id);
@@ -110,7 +111,6 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       expect((await post('passkeys/registration/verify',payload,first.token)).statusCode).toBe(400);
       await post('session/logout',{},first.token);
       expect(await sessionAccount(first.token)).toBeNull();expect(await sessionAccount(next.token)).toBe(first.accountID);
-      // The new credential really works for sign-in, without claiming on-chain recovery.
       const login=(await post('passkeys/authentication/options',{accountID:first.accountID})).json();
       const signedIn=await post('passkeys/authentication/verify',{accountID:first.accountID,requestID:login.requestID,response:backup.authentication(login.options.challenge)});
       expect(signedIn.statusCode).toBe(200);expect(signedIn.json()).toMatchObject({accountID:first.accountID,credentialCount:2});
@@ -143,7 +143,6 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   });
   it('authenticates payment routes with persisted sessions and immediately observes revocation', async () => {
     const service = new PaymentService(repository, mockChain(), mockPolicy(), 1);
-    // This test exercises HTTP + real persistence, without running the RPC monitor.
     service.tick = async () => {};
     const config = getConfig({ WALLET_ORIGIN: 'https://wallet.example' });
     const app = await buildApp({ config, payments: service, logger: false });
@@ -164,12 +163,10 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
       expect((await app.inject({ url, headers: { authorization: `Bearer ${session.token}` } })).statusCode).toBe(401);
     } finally { await app.close(); await revokeSession(outsider.token); }
   });
-
   it('provisions reviewed accounts atomically and idempotently without silently replacing saved authority',async()=>{
     const owner=await createAccount(), fixture=manifestFixture();
     const approved={...fixture.accounts[0],owner:owner.id,walletId:randomUUID(),address:StrKey.encodeContract(Buffer.from(randomUUID().replaceAll('-','').repeat(2),'hex'))};
     const manifest={...fixture,accounts:[approved]};
-    // Chain policy is injected; this test proves SQL boundaries, not live deployment.
     const policies={current:async()=>({fingerprint:'d'.repeat(64),recoveryReady:true})};
     const check=await provisionAccounts(manifest,false,{pool:db,policies});
     expect(check).toMatchObject({applied:false,wallets:[{action:'create'}]});
@@ -226,7 +223,6 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     await repository.setBalance(wallet.address,'9000',250);
     expect(await repository.balance(wallet.address)).toMatchObject({amountStroops:'3000',ledger:300});
   });
-
   it('persists signed attempt bytes across repository instances', async () => {
     const intent:Intent={network:'TESTNET',destination:'G'+'A'.repeat(55),amountStroops:'25000000',maxFeeStroops:'1000'};
     const key='persist_'+randomUUID().replaceAll('-','');
@@ -303,6 +299,4 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
     await expect(verify(owner.id,valid,challenge,[credentialId])).rejects.toThrow();
     await expect(verify(owner.id,assertion('https://wallet.example',challenge,2),challenge,['not-authorized'])).rejects.toThrow('CREDENTIAL_NOT_AUTHORIZED');
   });
-
 });
-
