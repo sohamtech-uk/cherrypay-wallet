@@ -29,3 +29,10 @@ Never enable spending or report ACTIVE without independent on-chain verification
 ## Verification log
 - Previous user report: TypeScript typecheck passed; 184 tests passed, 27 skipped, prior to subsequent adapter changes.
 - Changes after that report are **not yet verified**.\n- 2026-10-25: Step 1 security prerequisite committed: reject malformed/unsigned XDR and mismatched transaction hashes before writing deployment intent. Exact v0.8.0 deployment transaction construction remains pending.
+
+## Onboarding UX — 2026-10-25
+- Added immediate **Create smart wallet** prompt after successful first-passkey registration.
+- User can defer with **Not now**; authenticated users without a deployment can still start later.
+- Requests use the authenticated, idempotent deployment endpoint. Email verification and second passkey are enforced server-side.
+- Deployment status and manual refresh are visible; no false ACTIVE/spending claims.
+- UI typecheck and tests pending.
