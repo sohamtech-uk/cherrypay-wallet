@@ -31,7 +31,7 @@ export async function initializeStore(){
 }
 export async function createAccount(){
  const id=randomUUID(),userID=randomBytes(32).toString('base64url');
- await pool.execute('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES (?,?)',[id,userID]);return {id,userID};
+ await pool.execute('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES (?,?)',[id,userID]);return {id,webauthn_user_id:userID};
 }
 export async function sessionAccount(token:string|undefined){
  if(!token||!/^[a-zA-Z0-9_-]{40,100}$/.test(token))return null;
