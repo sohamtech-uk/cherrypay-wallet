@@ -92,7 +92,7 @@ sessions cannot be restored by late frontend responses.
 
 The browser prefers advertised `approvalMode: webauthn`, even if an external signer
 was injected. The raw approval route is disabled in WebAuthn mode so it cannot skip
-the API RP/origin/counter checks. The browser it verifies the options
+the API RP/origin/counter checks. The browser verifies the options
 response against the reviewed attempt, calls the authenticator, then posts the
 assertion. On timeout it keeps the attempt key and checks status; it never posts a
 replacement. Fee labels explicitly say maximum, not actual charged fee.
