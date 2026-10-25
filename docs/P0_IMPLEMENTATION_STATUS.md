@@ -21,3 +21,10 @@
 This PR must remain draft until typecheck, Docker integration tests and a security review pass.
 
 MySQL 8.4 replaces PostgreSQL for local development. Previous PostgreSQL volumes are not automatically migrated. Validate Docker startup, API typecheck, and concurrency tests before merge.
+
+## Conditional startup SQL
+- The API reads `apps/api/sql/001_wallet_schema.sql` on startup. Dockerfile copies this file into the API image.
+- It queries `information_schema.TABLES` for the four wallet tables and skips DDL if all exist; otherwise it runs `CREATE TABLE IF NOT EXISTS` statements.
+- The dedicated `DB_NAME` database must already exist and be accessible. Startup does not create databases or modify Cherry Money's existing schema.
+- This is bootstrap-only schema creation, not a versioned migration system: existing tables are not altered, and future schema changes require migrations.
+- Verify first startup, repeated startup, partial schema and missing database behavior locally. No Docker/MySQL integration tests have been run in this session.
