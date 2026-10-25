@@ -1,6 +1,6 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import type { PaymentRepository } from './repository.js';
-import { digest, PaymentError, requireThat, TERMINAL, validateIntent, type Attempt, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
+import { digest, PaymentError, requireThat, TERMINAL, validateIntent, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
 
 export class PaymentService {
   constructor(readonly store: PaymentRepository, readonly chain: Chain, readonly policies: PolicyReader, readonly startLedger: number) {
@@ -10,37 +10,42 @@ export class PaymentService {
     const current = await this.policies.current(wallet.address);
     requireThat(current.recoveryReady && current.fingerprint === fingerprint, 'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
   }
+  private async recipient(wallet: Wallet, intent: Intent) {
+    if (!StrKey.isValidContract(intent.destination)) return;
+    // A checksum-valid C address alone is not a supported receiving wallet.
+    const recipient = (await this.store.allWallets()).find(w => w.address === intent.destination);
+    requireThat(recipient && recipient.id !== wallet.id && recipient.routes.includes('contract'), 'UNVERIFIED_CONTRACT_RECIPIENT', 400);
+    const current = await this.policies.current(recipient.address);
+    requireThat(current.recoveryReady && current.fingerprint === recipient.policy, 'RECIPIENT_RECOVERY_OR_POLICY_UNREADY');
+  }
   async get(owner: string, walletId: string, id: string) {
     await this.store.wallet(walletId, owner); const a = await this.store.get(id);
     requireThat(a.walletId === walletId, 'ATTEMPT_NOT_FOUND', 404); return a;
   }
   async create(owner: string, walletId: string, intent: Intent, key: string) {
     const wallet = await this.store.wallet(walletId, owner); validateIntent(intent, wallet);
-    if (StrKey.isValidContract(intent.destination)) {
-      // C->C is limited to another explicitly provisioned Testnet wallet.
-      // The recipient must have a current, independently recovered signer policy.
-      const recipient = (await this.store.allWallets()).find(w => w.address === intent.destination);
-      requireThat(recipient && recipient.id !== wallet.id && recipient.routes.includes('contract'), 'UNVERIFIED_CONTRACT_RECIPIENT', 400);
-      const receivingPolicy = await this.policies.current(recipient.address);
-      requireThat(receivingPolicy.recoveryReady && receivingPolicy.fingerprint === recipient.policy, 'RECIPIENT_RECOVERY_OR_POLICY_UNREADY');
-    }
+    // Recover the durable attempt BEFORE querying chain policy. A recipient outage
+    // or rotation must not hide a previous submission or invite a replacement key.
     const prior = await this.store.byKey(walletId, key);
     if (prior) { requireThat(prior.requestDigest === digest(intent), 'IDEMPOTENCY_CONFLICT'); return prior; }
     await this.policy(wallet);
+    await this.recipient(wallet, intent);
     const a = await this.store.create(wallet, intent, key);
-    // Another process with the same key may own preparation already. Return its persisted state.
     try { return await this.prepare(a.id); }
     catch (error) { if (error instanceof PaymentError && error.code === 'ATTEMPT_BUSY_OR_INVALID_STATE') return this.store.get(a.id); throw error; }
   }
   private async prepare(id: string) {
     const { attempt: a, token } = await this.store.claim(id, ['preparing']);
     try {
-      const wallet = (await this.store.allWallets()).find(w => w.id === a.walletId)!;
+      const wallet = (await this.store.allWallets()).find(w => w.id === a.walletId);
+      requireThat(wallet, 'WALLET_NOT_FOUND', 404);
+      validateIntent(a.intent, wallet);
       await this.policy(wallet, a.policy);
+      await this.recipient(wallet, a.intent);
       a.prepared = await this.chain.prepare(wallet, a.intent);
+      await this.recipient(wallet, a.intent);
       a.status = 'awaiting_approval'; a.failureCode = undefined;
     } catch (error) {
-      // No broadcast possible during preparation; definitive local validation may release the slot.
       a.status = error instanceof PaymentError ? 'rejected' : 'preparing';
       a.failureCode = error instanceof PaymentError ? error.code : 'RPC_UNAVAILABLE';
     }
@@ -53,17 +58,20 @@ export class PaymentService {
     a.status = 'authorizing'; await this.store.checkpoint(a, token);
     try {
       requireThat(a.prepared && a.prepared.expiresAt > Date.now(), 'QUOTE_EXPIRED');
-      const wallet = await this.store.wallet(walletId, owner); await this.policy(wallet, a.policy);
-      const signed = await this.chain.authorize(wallet, a.intent, a.prepared, authXdr);
-      // Detect rotation during the asynchronous authorization check as well.
+      const wallet = await this.store.wallet(walletId, owner);
+      validateIntent(a.intent, wallet);
       await this.policy(wallet, a.policy);
+      await this.recipient(wallet, a.intent);
+      const signed = await this.chain.authorize(wallet, a.intent, a.prepared, authXdr);
+      // Refuse changes discovered during the asynchronous authorization check.
+      await this.policy(wallet, a.policy);
+      await this.recipient(wallet, a.intent);
       a.signedXdr = signed.signedXdr; a.transactionHash = signed.transactionHash;
       a.status = 'ready'; a.failureCode = undefined;
     } catch (error) {
       a.status = error instanceof PaymentError ? 'rejected' : 'awaiting_approval';
       a.failureCode = error instanceof PaymentError ? error.code : 'RPC_UNAVAILABLE';
     }
-    // Signing is never followed by broadcast until this durable commit succeeds.
     await this.store.finish(a, token);
     return a.signedXdr ? this.reconcile(a.id) : a;
   }
@@ -77,9 +85,10 @@ export class PaymentService {
     const existing = await this.store.get(id); if (TERMINAL.includes(existing.status)) return existing;
     const { attempt: a, token } = await this.store.claim(id, ['ready', 'pending', 'unknown']);
     requireThat(a.signedXdr && a.transactionHash && a.prepared, 'MISSING_SIGNED_TRANSACTION');
-    // Unknown is persisted BEFORE the external call, covering process death and transport timeout.
     a.status = 'unknown'; await this.store.checkpoint(a, token);
     try {
+      // Always establish the outcome first. A later signer change cannot undo an
+      // already successful transfer or turn an unknown submission into a failure.
       const outcome = await this.chain.outcome(a.transactionHash);
       if (outcome.status === 'SUCCESS') {
         requireThat(outcome.transactionHash === a.transactionHash, 'TRANSACTION_HASH_MISMATCH');
@@ -92,7 +101,12 @@ export class PaymentService {
         requireThat(outcome.transactionHash === a.transactionHash, 'TRANSACTION_HASH_MISMATCH');
         a.status = 'failed'; a.failureCode = 'ON_CHAIN_FAILURE';
       } else if (a.prepared.expiresAt > Date.now()) {
-        // Retry only these identical persisted bytes, with the same sequence, nonce and hash.
+        const wallet = (await this.store.allWallets()).find(w => w.id === a.walletId);
+        requireThat(wallet, 'WALLET_NOT_FOUND', 404);
+        validateIntent(a.intent, wallet);
+        await this.policy(wallet, a.policy);
+        await this.recipient(wallet, a.intent);
+        // Replay only the identical durable bytes. No new nonce, signature or key.
         await this.chain.submit(a.signedXdr); a.status = 'pending'; a.failureCode = undefined;
       } else { a.failureCode = 'EXPIRED_OUTCOME_UNRESOLVED'; }
     } catch (error) { a.status = 'unknown'; a.failureCode = error instanceof PaymentError ? error.code : 'RPC_UNAVAILABLE'; }
@@ -108,10 +122,9 @@ export class PaymentService {
           const claimed = await this.store.claim(a.id, ['awaiting_approval', 'authorizing']);
           claimed.attempt.status = 'rejected'; claimed.attempt.failureCode = 'QUOTE_EXPIRED'; await this.store.finish(claimed.attempt, claimed.token);
         }
-      } catch { /* A concurrent worker may own this attempt. Next tick retries safely. */ }
+      } catch { /* Concurrent worker or unavailable dependency: retain durable state. */ }
     }
     const cursor = await this.store.cursor();
-    // A failed/expired RPC page never advances the durable cursor. Require operator backfill on retention gaps.
     const page = await this.chain.events(cursor, this.startLedger);
     await this.store.ingest(page.events, cursor, page.cursor);
     for (const wallet of await this.store.allWallets()) {
