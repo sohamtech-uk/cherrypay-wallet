@@ -14,9 +14,9 @@ type Cred = {id:string;public_key:string;counter:string|number;transports:string
 function credentials(rows: any[]): Cred[] {
   return rows.map(r => ({...r, transports: typeof r.transports === 'string' ? JSON.parse(r.transports) : r.transports}));
 }
-export async function createAccount() {
+export async function createAccount(email?: string) {
   const id = randomUUID(), userID = randomBytes(32).toString('base64url');
-  await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[id,userID]);
+  await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id,email) VALUES($1,$2,$3)',[id,userID,email ? normalizeEmail(email) : null]);
   return {id,webauthn_user_id:userID};
 }
 /** Emails are lookup identifiers; account UUIDs remain permanent ownership keys. */
@@ -59,6 +59,10 @@ export async function verifyEmail(accountID: string, code: string) {
     return true;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
+}
+export async function emailForAccount(accountID: string) {
+  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>('SELECT email,email_verified_at FROM wallet_accounts WHERE id=$1',[accountID]);
+  return rows[0];
 }
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
   if(!token || !/^[a-zA-Z0-9_-]{40,100}$/.test(token)) return null;
