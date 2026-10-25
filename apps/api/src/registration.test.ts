@@ -14,7 +14,7 @@ beforeEach(() => {
   mocks.generateRegistrationOptions.mockResolvedValue({ challenge: 'registration-challenge' });
   mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: 'authentication-challenge' });
 });
-describe('MySQL enrollment wiring regression', () => {
+describe('PostgreSQL enrollment wiring regression', () => {
   it('creates the initial account and challenge through the persistent store', async () => {
     expect(await beginRegistration('localhost')).toMatchObject({ accountID: 'server-generated-account', requestID: 'persisted-request-id' });
     expect(mocks.newChallenge).toHaveBeenCalledWith('server-generated-account', 'register_initial', 'registration-challenge', undefined);

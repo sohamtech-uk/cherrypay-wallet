@@ -16,6 +16,27 @@ permissions:
 jobs:
   payment-api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: integration_test_only
+          POSTGRES_DB: cherrypay_wallet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet -d cherrypay_wallet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_NAME: cherrypay_wallet
+      DB_USER: wallet
+      DB_PASSWORD: integration_test_only
+      RUN_DB_INTEGRATION: '1'
     defaults:
       run:
         working-directory: apps/api

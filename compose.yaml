@@ -1,4 +1,19 @@
 services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cherrypay_wallet}
+      POSTGRES_USER: ${DB_USER:-wallet}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - wallet_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wallet} -d ${DB_NAME:-cherrypay_wallet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
   api:
     build:
       context: ./apps/api
@@ -9,8 +24,8 @@ services:
       HOST: "0.0.0.0"
       WALLET_ORIGIN: ${WALLET_ORIGIN:-http://localhost:5174}
       WEBAUTHN_RP_ID: localhost
-      DB_HOST: ${DB_HOST:-host.docker.internal}
-      DB_PORT: ${DB_PORT:-3306}
+      DB_HOST: db
+      DB_PORT: "5432"
       DB_USER: ${DB_USER:-wallet}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       DB_NAME: ${DB_NAME:-cherrypay_wallet}
@@ -18,8 +33,9 @@ services:
       - "127.0.0.1:3001:3001"
     volumes:
       - ./apps/api/src:/app/src:ro
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -46,3 +62,5 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+volumes:
+  wallet_postgres:

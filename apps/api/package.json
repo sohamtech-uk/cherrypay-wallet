@@ -14,14 +14,15 @@
     "@simplewebauthn/server": "11.0.0",
     "@stellar/stellar-sdk": "14.6.1",
     "fastify": "5.2.1",
-    "mysql2": "3.12.0"
+    "pg": "8.16.3"
   },
   "devDependencies": {
     "@simplewebauthn/types": "11.0.0",
     "@types/node": "22.10.0",
     "tsx": "4.19.2",
     "typescript": "5.7.3",
-    "vitest": "2.1.8"
+    "vitest": "2.1.8",
+    "@types/pg": "8.16.0"
   },
   "engines": {
     "node": ">=22.0.0"
