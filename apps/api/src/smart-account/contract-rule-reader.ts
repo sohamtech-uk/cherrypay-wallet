@@ -1,23 +1,96 @@
 import { createHash } from 'node:crypto';
-import { Address, xdr } from '@stellar/stellar-sdk';
-import { Client, type ContextRule, type Signer } from 'smart-account-kit-bindings';
+import { Address, StrKey, xdr, type rpc } from '@stellar/stellar-sdk';
+import { Client, type ContextRule } from 'smart-account-kit-bindings';
 import { attestAccountCode } from './onchain-code.js';
 import { createTestnetRpc } from './deployment-evidence.js';
+import { readHydratedContextRule, signerScVal, simulationReader, type RuleSpec } from './context-rules.js';
 import type { ContractRuleReader, VerifiedSignerRules } from './passkey-codec.js';
+import type { PolicyReader } from '../payments/model.js';
 import { TESTNET_PASSPHRASE, TESTNET_RPC_URL } from '../config.js';
 
-/** Reads explicitly configured rule IDs directly from Testnet using the generated
- * contract binding. No indexer or browser-supplied signer state is trusted. */
-export class TestnetContractRuleReader implements ContractRuleReader {
-  constructor(private readonly ruleIds: readonly number[], private readonly verifier: string) {
-    if (!ruleIds.length || ruleIds.length > 16 || new Set(ruleIds).size !== ruleIds.length ||
-      ruleIds.some(id => !Number.isInteger(id) || id < 0 || id > 0xffffffff)) throw new Error('INVALID_RULE_SELECTION');
+export type RuleReaderRpc = Pick<rpc.Server, 'getNetwork' | 'getContractData' | 'getLatestLedger' | 'simulateTransaction'>;
+export type RuleSelection = Readonly<{
+  /** Rules committed into the transfer digest, one per auth context, in invocation order. */
+  transferRuleIds: readonly number[];
+  /** Optional separate Default rule holding an independent backup passkey. Without it recovery is not ready. */
+  recoveryRuleId?: number;
+  /** WebAuthn verifier contract that every accepted External signer must use. */
+  verifier: string;
+}>;
+export type VerifiedAccountRules = VerifiedSignerRules & Readonly<{ recoveryReady: boolean }>;
+
+type SingleSigner = { credentialId: string; signerXdr: string; key: string };
+const isU32 = (id: number) => Number.isInteger(id) && id >= 0 && id <= 0xffffffff;
+
+/** Accept only a Default/CallContract rule with exactly one External verifier signer and no policies. */
+function singlePasskeySigner(rule: ContextRule, verifier: string, spec: RuleSpec): SingleSigner {
+  if (rule.policies.length || rule.policy_ids.length || rule.signers.length !== 1 || rule.signer_ids.length !== 1) {
+    throw new Error('COMPLEX_SIGNER_POLICY_REQUIRES_SEPARATE_VERIFICATION');
   }
+  const signer = rule.signers[0];
+  if (signer.tag !== 'External' || signer.values[0] !== verifier) throw new Error('NOT_WEBAUTHN_SIGNER');
+  const keyData = Buffer.from(signer.values[1]);
+  // Smart Account Kit key data: 65-byte uncompressed P-256 public key followed by the credential ID.
+  if (keyData.length <= 65 || keyData[0] !== 4) throw new Error('INVALID_WEBAUTHN_KEY_DATA');
+  return {
+    credentialId: keyData.subarray(65).toString('base64url'),
+    signerXdr: signerScVal(spec, signer).toXDR('base64'),
+    key: keyData.subarray(0, 65).toString('hex'),
+  };
+}
+
+/** Reads explicitly configured rule IDs directly from Testnet using the generated
+ * contract spec, hydrating signer/policy IDs from the contract when the deployed
+ * getter omits them. No indexer or browser-supplied signer state is trusted. */
+export class TestnetContractRuleReader implements ContractRuleReader {
+  private readonly selection: RuleSelection;
+  constructor(selection: RuleSelection, private readonly server: RuleReaderRpc = createTestnetRpc()) {
+    const ids = [...selection.transferRuleIds, ...(selection.recoveryRuleId === undefined ? [] : [selection.recoveryRuleId])];
+    if (!selection.transferRuleIds.length || selection.transferRuleIds.length > 16 || new Set(ids).size !== ids.length || !ids.every(isU32)) throw new Error('INVALID_RULE_SELECTION');
+    if (!StrKey.isValidContract(selection.verifier)) throw new Error('INVALID_VERIFIER_ADDRESS');
+    this.selection = Object.freeze({ ...selection, transferRuleIds: Object.freeze([...selection.transferRuleIds]) });
+  }
+
+  /** Snapshot of code + selected rules + optional recovery rule, independent of any auth entry. */
+  async readAccountRules(address: string): Promise<VerifiedAccountRules & { rules: readonly ContextRule[] }> {
+    const code = await attestAccountCode(address, this.server);
+    const latest = await this.server.getLatestLedger();
+    const spec = new Client({ contractId: address, networkPassphrase: TESTNET_PASSPHRASE, rpcUrl: TESTNET_RPC_URL }).spec as unknown as RuleSpec;
+    const read = simulationReader(this.server, address);
+    const { transferRuleIds, recoveryRuleId, verifier } = this.selection;
+    const allIds = recoveryRuleId === undefined ? transferRuleIds : [...transferRuleIds, recoveryRuleId];
+    const hydrated = [];
+    for (const id of allIds) hydrated.push(await readHydratedContextRule(read, spec, id));
+    const ledgers = hydrated.flatMap(h => h.ledgers);
+    if (ledgers.some(l => l < latest.sequence)) throw new Error('STALE_POLICY_READ');
+    const rules = hydrated.map(h => h.rule);
+    for (const rule of rules) {
+      if (rule.valid_until != null && rule.valid_until < latest.sequence) throw new Error('CONTEXT_RULE_EXPIRED');
+    }
+    const transferRules = rules.slice(0, transferRuleIds.length);
+    const signers = transferRules.map(rule => singlePasskeySigner(rule, verifier, spec));
+    const credentialIds = [...new Set(signers.map(s => s.credentialId))];
+    if (credentialIds.length !== 1) throw new Error('MULTI_SIGNER_POLICY_NOT_SUPPORTED');
+    const signerXdrByCredential: Record<string, string> = { [credentialIds[0]]: signers[0].signerXdr };
+    if (signers.some(s => s.signerXdr !== signers[0].signerXdr)) throw new Error('SIGNER_COLLISION');
+    let recoveryReady = false;
+    if (recoveryRuleId !== undefined) {
+      const recoveryRule = rules[rules.length - 1];
+      if (recoveryRule.context_type.tag !== 'Default' || recoveryRule.valid_until != null) throw new Error('UNSUPPORTED_RECOVERY_RULE');
+      const backup = singlePasskeySigner(recoveryRule, verifier, spec);
+      if (backup.credentialId === credentialIds[0] || backup.key === signers[0].key) throw new Error('BACKUP_KEY_MUST_BE_INDEPENDENT');
+      recoveryReady = true;
+    }
+    // Hydrated IDs are part of the fingerprint: a signer removed and re-added gets a new
+    // registry ID, which must invalidate any outstanding approval.
+    const fingerprint = createHash('sha256').update(JSON.stringify({
+      address, wasmSha256: code.wasmSha256, recoveryRuleId: recoveryRuleId ?? null,
+      rules: rules.map(r => ({ id: r.id, type: r.context_type, validUntil: r.valid_until ?? null, signerIds: r.signer_ids, policyIds: r.policy_ids, signers: r.signers.map(s => s.tag === 'External' ? [s.tag, s.values[0], Buffer.from(s.values[1]).toString('hex')] : [s.tag, s.values[0]]) })),
+    })).digest('hex');
+    return { address, wasmSha256: code.wasmSha256, ledger: Math.max(latest.sequence, ...ledgers), contextRuleIds: [...transferRuleIds], credentialIds, signerXdrByCredential, fingerprint, recoveryReady, rules: transferRules };
+  }
+
   async readVerifiedRules(address: string, authEntry: xdr.SorobanAuthorizationEntry): Promise<VerifiedSignerRules> {
-    const server = createTestnetRpc();
-    const code = await attestAccountCode(address, server);
-    const latest = await server.getLatestLedger();
-    const client = new Client({ contractId: address, networkPassphrase: TESTNET_PASSPHRASE, rpcUrl: TESTNET_RPC_URL });
     const contexts: string[] = [];
     const walk = (invocation: xdr.SorobanAuthorizedInvocation) => {
       const fn = invocation.function();
@@ -26,41 +99,22 @@ export class TestnetContractRuleReader implements ContractRuleReader {
       for (const child of invocation.subInvocations()) walk(child);
     };
     walk(authEntry.rootInvocation());
-    if (contexts.length !== this.ruleIds.length) throw new Error('CONTEXT_RULE_COUNT_MISMATCH');
-    const rules: ContextRule[] = [];
-    for (const id of this.ruleIds) {
-      const tx = await client.get_context_rule({ context_rule_id: id });
-      const rule = tx.result;
-      if (rule.id !== id) throw new Error('CONTEXT_RULE_ID_MISMATCH');
-      rules.push(rule);
-    }
-    const signerXdrByCredential: Record<string,string> = {};
-    const credentialIds: string[] = [];
-    for (let i = 0; i < rules.length; i++) {
-      const rule = rules[i];
-      if (rule.valid_until != null && rule.valid_until < latest.sequence) throw new Error('CONTEXT_RULE_EXPIRED');
+    if (contexts.length !== this.selection.transferRuleIds.length) throw new Error('CONTEXT_RULE_COUNT_MISMATCH');
+    const { rules, recoveryReady: _recovery, ...verified } = await this.readAccountRules(address);
+    rules.forEach((rule, i) => {
       if (rule.context_type.tag !== 'Default' &&
           !(rule.context_type.tag === 'CallContract' && rule.context_type.values[0] === contexts[i])) throw new Error('CONTEXT_RULE_SCOPE_MISMATCH');
-      if (rule.policies.length || rule.signers.length !== 1 || rule.signer_ids.length !== rule.signers.length) throw new Error('COMPLEX_SIGNER_POLICY_REQUIRES_SEPARATE_VERIFICATION');
-      const signer: Signer = rule.signers[0];
-      if (signer.tag !== 'External' || signer.values[0] !== this.verifier) throw new Error('NOT_WEBAUTHN_SIGNER');
-      const credentialId = Buffer.from(signer.values[1]).toString('base64url');
-      const signerVal = xdr.ScVal.scvVec([
-        xdr.ScVal.scvSymbol('External'),
-        xdr.ScVal.scvVec([
-          xdr.ScVal.scvAddress(Address.fromString(signer.values[0]).toScAddress()),
-          xdr.ScVal.scvBytes(signer.values[1]),
-        ]),
-      ]);
-      if (signerXdrByCredential[credentialId] && signerXdrByCredential[credentialId] !== signerVal.toXDR('base64')) throw new Error('SIGNER_COLLISION');
-      signerXdrByCredential[credentialId] = signerVal.toXDR('base64');
-      if (!credentialIds.includes(credentialId)) credentialIds.push(credentialId);
-    }
-    if (credentialIds.length !== 1) throw new Error('MULTI_SIGNER_POLICY_NOT_SUPPORTED');
-    const fingerprint = createHash('sha256').update(JSON.stringify({
-      address, wasmSha256: code.wasmSha256,
-      rules: rules.map(r => ({ id: r.id, type: r.context_type, validUntil: r.valid_until, signerIds: r.signer_ids, policyIds: r.policy_ids, signers: r.signers.map(s => s.tag === 'External' ? [s.tag,s.values[0],Buffer.from(s.values[1]).toString('hex')] : [s.tag,s.values[0]]) }))
-    })).digest('hex');
-    return { address, wasmSha256: code.wasmSha256, ledger: latest.sequence, contextRuleIds: [...this.ruleIds], credentialIds, signerXdrByCredential, fingerprint };
+    });
+    return verified;
+  }
+}
+
+/** Payment-policy reader backed by the same on-chain rule snapshot as StellarPasskeyCodec,
+ * so the fingerprint stored at prepare time is exactly what the codec re-checks at approval. */
+export class ContractRulePolicyReader implements PolicyReader {
+  constructor(private readonly reader: TestnetContractRuleReader) {}
+  async current(address: string): Promise<{ fingerprint: string; recoveryReady: boolean }> {
+    const { fingerprint, recoveryReady } = await this.reader.readAccountRules(address);
+    return { fingerprint, recoveryReady };
   }
 }
