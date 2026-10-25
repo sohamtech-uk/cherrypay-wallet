@@ -15,7 +15,7 @@ function fixture() {
     getNetwork: vi.fn(async () => ({ passphrase: String(TESTNET_PASSPHRASE) })),
     getAccount: vi.fn(async () => new Account(f.deployer.publicKey(), '10')),
     getLedgerEntries: vi.fn(async () => ({ entries: [], latestLedger: 200 })),
-    simulateTransaction: vi.fn(async () => ({ _parsed: true, id: 'simulation', latestLedger: 200, events: [], minResourceFee: '500', transactionData: new SorobanDataBuilder().setResourceFee('500'), result: { auth: [], retval: new Address(f.descriptor.address).toScVal() } })),
+    simulateTransaction: vi.fn(async (_tx: Transaction) => ({ _parsed: true, id: 'simulation', latestLedger: 200, events: [], minResourceFee: '500', transactionData: new SorobanDataBuilder().setResourceFee('500'), result: { auth: [], retval: new Address(f.descriptor.address).toScVal() } })),
     sendTransaction: vi.fn(), getTransaction: vi.fn(),
   };
   const chain = new StellarDeploymentChain(server as unknown as DeploymentRpc, f.deployer, 100000000n);
@@ -101,7 +101,7 @@ describe('independent deployment and primary-signer evidence', () => {
     f.rule.signers[0] = {tag:'External',values:[f.descriptor.verifierAddress,Buffer.alloc(97)]};
     await expect(f.chain.verifyBinding(f.descriptor,199)).rejects.toThrow('DEPLOYED_PASSKEY_BINDING_MISMATCH');
   });
-  it('rejects extra rules, expired rules, delegated authority and missing code evidence', async () => {
+  it('rejects extra rules, expired rules and delegated authority', async () => {
     const f = policyFixture(); f.setCount(2);
     await expect(f.chain.verifyBinding(f.descriptor,199)).rejects.toThrow('BINDING_MISMATCH');
     f.setCount(1); f.rule.valid_until=999;
