@@ -1,5 +1,5 @@
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
-import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/server';
+import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
 import * as store from './store.js';
 export async function beginRegistration(rpID:string,accountID?:string,token?:string){
  const account=accountID?await store.getAccount(accountID):await store.createAccount();
