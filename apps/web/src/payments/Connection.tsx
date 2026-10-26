@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { readAccess } from './access-api';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
 import { parseDeployment, type DeploymentView } from './deployment';
@@ -24,6 +25,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
+  const [sessionVersion,setSessionVersion]=useState(0);
   const [credentialCount, setCredentialCount] = useState(0);
   const [canSign, setCanSign] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -32,6 +34,16 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [notice, setNotice] = useState('');
   const [deploymentStatus, setDeploymentStatus] = useState('');
   const [deployment, setDeployment] = useState<DeploymentView | null>(null);
+  const access = useMemo(() => {
+    const session=token.current,id=generation.current;
+    const api=apiClient(()=>session);
+    const check=()=>{if(!sessionVersion||!authenticated||!accountId||!session||generation.current!==id||token.current!==session||Date.now()>=deadline.current)throw Error('Session expired');};
+    return {
+      listAccess:async()=>{check();const page=await readAccess(api);check();return page;},
+      revokeAccess:async(eventId:string)=>{check();await api(`session/access-history/${encodeURIComponent(eventId)}/revoke`,{});check();},
+      shareLocation:async(latitude:number,longitude:number)=>{check();await api('session/location',{latitude,longitude});check();},
+    };
+  },[authenticated,accountId,sessionVersion]);
   useEffect(() => () => {
     generation.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
     const abandoned = token.current; token.current = undefined;
@@ -106,7 +118,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
-    setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
+    setAuthenticated(true); setSessionVersion(v=>v+1); setCredentialCount(Number(session.credentialCount));
     if (previous && previous !== verifiedToken) {
       try { await revoke(previous); }
       catch { if (active(id)) setError('Your new session is active. Previous session logout could not be confirmed; it will expire.'); }
@@ -218,13 +230,13 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
   return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
-    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
+    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect, ...access }}>
     {showSetup && <section className="card payment-screen wallet-connect" aria-label="Payment service connection" aria-busy={busy}>
     <h1>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h1>
     <p>{authenticated ? 'Finish setting up your wallet to start making payments.' : 'One email. One passkey. Your own wallet for sending and receiving XLM.'}</p>
-    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
+    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
       {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
-      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your email is authenticated. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
+      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your passkey session is active. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
         {deployment?.address ? <>
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>

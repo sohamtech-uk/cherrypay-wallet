@@ -19,7 +19,7 @@ export async function beginRegistration(rpID:string,accountID?:string,token?:str
  if(!accountID&&credentials.length)throw Error('Existing passkey authentication required');
  return initialRegistrationOptions(rpID,account,credentials,accountID,token);
 }
-export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string){
+export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string,metadata?:store.AccessMetadata){
  const count=await store.withLockedAccount(accountID,async client=>{
   const challenge=await store.consumeLockedChallenge(client,requestID,accountID,token?'register_backup':'register_initial',token);
   const credentials=await store.credentialsLocked(client,accountID);
@@ -30,7 +30,7 @@ export async function finishRegistration(accountID:string,requestID:string,respo
   await store.addCredentialLocked(client,accountID,{id:c.id,publicKey:c.publicKey,counter:c.counter,transports:response.response.transports});
   return credentials.length+1;
  });
- return {verified:true,accountID,credentialCount:count,backupCredentialEnrolled:count>=2,recoveryReady:false,...await store.createSession(accountID)};
+ return {verified:true,accountID,credentialCount:count,backupCredentialEnrolled:count>=2,recoveryReady:false,...await store.createSession(accountID,metadata)};
 }
 export async function beginAuthentication(accountID:string,rpID:string){
  const credentials=await store.getCredentials(accountID);
@@ -38,7 +38,7 @@ export async function beginAuthentication(accountID:string,rpID:string){
  const options=await generateAuthenticationOptions({rpID,userVerification:'required',allowCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
  return {requestID:await store.newChallenge(accountID,'authenticate',options.challenge),options};
 }
-export async function finishAuthentication(accountID:string,requestID:string,response:AuthenticationResponseJSON,rpID:string,origin:string){
+export async function finishAuthentication(accountID:string,requestID:string,response:AuthenticationResponseJSON,rpID:string,origin:string,metadata?:store.AccessMetadata){
  const count=await store.withLockedAccount(accountID,async client=>{
   const challenge=await store.consumeLockedChallenge(client,requestID,accountID,'authenticate');
   const credentials=await store.credentialsLocked(client,accountID),c=credentials.find(x=>x.id===response.id);
@@ -48,7 +48,7 @@ export async function finishAuthentication(accountID:string,requestID:string,res
   await store.updateCounterLocked(client,c.id,accountID,Number(c.counter),result.authenticationInfo.newCounter);
   return credentials.length;
  });
- return {verified:true,accountID,credentialCount:count,...await store.createSession(accountID)};
+ return {verified:true,accountID,credentialCount:count,...await store.createSession(accountID,metadata)};
 }
 
 
