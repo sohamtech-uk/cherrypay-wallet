@@ -31,11 +31,11 @@ export function WalletShell({ children, externalNetwork }: { children: React.Rea
         <nav aria-label="Wallet navigation">{navigation.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}><Icon size={19}/><span>{label}</span></NavLink>)}
           <NavLink className="desktop-nav" to="/invoices"><ReceiptText size={19}/><span>Invoices</span></NavLink>
         </nav>
-        <div className="sidebar-bottom"><a href="https://cherrymoney.co.uk/" target="_blank" rel="noreferrer">Part of Cherry Money ↗</a><Link to="/security">Security & recovery</Link></div>
+        <div className="sidebar-bottom"><a href="https://cherrymoney.co.uk/" target="_blank" rel="noreferrer">Part of Cherry Money ↗</a><Link to="/security">Security & recovery</Link><Link to="/developers">API documentation</Link></div>
       </aside>
       <main className="main" id="wallet-content" tabIndex={-1}>
         <div className="content" ref={content}>{children}</div>
-        <footer className="workspace-footer"><span>{mainnet ? 'Real USDC · Base to Stellar mainnet' : readOnly ? 'Recipient checks never approve a payment.' : 'Testnet XLM has no real-world value.'}</span><a href="https://cherrymoney.co.uk/help" target="_blank" rel="noreferrer">Help</a><a href="https://cherrymoney.co.uk/privacy" target="_blank" rel="noreferrer">Privacy</a></footer>
+        <footer className="workspace-footer"><span>{mainnet ? 'Real USDC · Base to Stellar mainnet' : readOnly ? 'Recipient checks never approve a payment.' : 'Testnet XLM has no real-world value.'}</span><Link to="/developers">API reference</Link><a href="https://cherrymoney.co.uk/help" target="_blank" rel="noreferrer">Help</a><a href="https://cherrymoney.co.uk/privacy" target="_blank" rel="noreferrer">Privacy</a></footer>
       </main>
     </div>
   </div>;
