@@ -16,8 +16,8 @@ integration('durable user-requested C-wallet funding (synthetic chain evidence)'
  async function fixture(){
   const f=deploymentFixture(),source=Keypair.random().publicKey();
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[f.owner,randomUUID()]);
-  await pool.query(`INSERT INTO wallet_deployment_jobs(account_id,status,contract_address,descriptor,confirmed_ledger,signer_rule_id,binding_verified_at)
-    VALUES($1,'CONFIRMED',$2,$3,200,0,NOW())`,[f.owner,f.descriptor.address,JSON.stringify(f.descriptor)]);
+  await pool.query(`INSERT INTO wallet_deployment_jobs(account_id,status,contract_address,descriptor,confirmed_ledger,signer_rule_id,binding_verified_at,transaction_hash)
+    VALUES($1,'CONFIRMED',$2,$3,200,0,NOW(),$4)`,[f.owner,f.descriptor.address,JSON.stringify(f.descriptor),randomUUID().replaceAll('-','').repeat(2)]);
   const p={signedXdr:'synthetic-checkpoint',transactionHash:randomUUID().replaceAll('-','').repeat(2),expiresAt:Date.now()+60000};
   const chain={source,verify:vi.fn(async()=>{}),prepare:vi.fn(async()=>p),submit:vi.fn(async(_prepared:typeof p)=>{}),outcome:vi.fn(async():Promise<Outcome>=>({status:'NOT_FOUND'}))};
   const service=new ContractFundingService(chain,pool);
