@@ -11,8 +11,6 @@ export function Invoices() {
 function InvoiceManager() {
   const adapter=usePayments()!,api=adapter.invoices!;
   const [params] = useSearchParams();
-  const [creating, setCreating] = useState(params.get('create') === '1');
-  const [filter, setFilter] = useState('all');
   const requestedId = params.get('invoice');
   const [items,setItems]=useState<Invoice[]>([]),[next,setNext]=useState<string>();
   const [receipts,setReceipts]=useState<InvoiceReceipt[]>([]),[receiptNext,setReceiptNext]=useState<string>();
