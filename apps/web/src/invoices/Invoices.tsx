@@ -34,7 +34,11 @@ function InvoiceManager() {
     return()=>{active=false;clearInterval(timer);};
   },[api,selectedId]);
   async function run(work:()=>Promise<void>) {if(mutex.current)return;mutex.current=true;setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Invoice request failed.');}finally{mutex.current=false;setBusy(false);}}
+  // The server creates and persists a fresh UUID per invoice. A retry of the
+  // same merchant invoice reference must recover its original QR unchanged.
   const url=selected?`${window.location.origin}/pay/${encodeURIComponent(selected.id)}`:'';
+  const shareable=!!selected && selected.status==='unpaid' && selected.paidStroops==='0'
+    && !selected.paymentPending && !selected.expired && selected.expiresAt>Date.now();
   return <section className="card payment-screen invoice-screen"><span className="eyebrow">STELLAR TESTNET</span><h1>Invoices & reconciliation</h1>
     <p>Share a payment link. Track the receipt. Match it to your invoice.</p><Link className="text-link" to="/business">← Business dashboard</Link>
     <p role="alert" className="error">{error}</p><p role="status">{notice}</p>
@@ -59,23 +63,27 @@ function InvoiceManager() {
       <p>Allocated: {xlm(selected.paidStroops)} / {xlm(selected.amountStroops)} XLM. Remaining: {xlm(selected.remainingStroops)} XLM.</p>
       {selected.paymentPending&&<p role="status">A payment is being resolved. Additional checkout payments are blocked.</p>}
       {selected.expired&&<p>This payment link has expired. Existing transfers can still be reconciled.</p>}
-      <div className="receive-qr"><QRCodeSVG value={url} size={224} level="M" title={`Pay invoice ${selected.invoiceReference}`}/></div>
-      <label htmlFor="invoice-link">Invoice payment link</label><input id="invoice-link" value={url} readOnly/>
-      <button className="secondary-button" onClick={()=>void run(async()=>{await navigator.clipboard.writeText(url);setNotice('Invoice payment link copied.');})}>Copy invoice link</button>
-      <p className="small-copy">The payer reviews the invoice and approves with their passkey.</p>
+      {selected.status!=='unpaid'&&<p role="status">Invoice payment complete or previously allocated. Its QR code is closed permanently; another payment for this invoice will be rejected.</p>}
+      <p className="small-copy">Unique payment request ID: <span className="mono">{selected.id}</span>. Each invoice reference has its own persistent, non-reusable QR link.</p>
+      {shareable?<>
+        <div className="receive-qr"><QRCodeSVG value={url} size={224} level="M" title={`Pay invoice ${selected.invoiceReference}`}/></div>
+        <label htmlFor="invoice-link">Invoice payment link</label><input id="invoice-link" value={url} readOnly/>
+        <button className="secondary-button" onClick={()=>void run(async()=>{await navigator.clipboard.writeText(url);setNotice('Invoice payment link copied.');})}>Copy invoice link</button>
+        <p className="small-copy">This QR is unique to this invoice. The payer reviews the exact amount and approves with a passkey; it becomes nonpayable after one settlement.</p>
+      </>:<p role="status">Payment QR unavailable: this invoice is settled, expired or has an unresolved payment. The original link remains available for viewing its status, not for another payment.</p>}
       <h3>Allocated receipts</h3>{!selected.receipts.length&&<p>No verified payments allocated yet.</p>}
       <ul>{selected.receipts.map(r=><li key={r.eventId}>{xlm(r.amountStroops)} XLM · {r.method}{r.late?' · received after expiry':''}<br/><a href={`https://stellar.expert/explorer/testnet/tx/${r.transactionHash}`} target="_blank" rel="noreferrer">Verified transaction</a><p className="mono">{r.eventId}</p><p>{r.note}</p></li>)}</ul>
       {selected.receiptsTruncated&&<p>Showing the first 100 allocations. Totals include all receipts.</p>}
-      <details className="disclosure reconciliation-tools"><summary>Assign an unmatched receipt</summary><p>Use your invoice records to confirm this payment belongs here. Matching amounts alone do not establish an invoice match. Full receipts are allocated once; partial and excess payments remain visible.</p>
+      {selected.status==='unpaid'&&!selected.paymentPending&&<details className="disclosure reconciliation-tools"><summary>Assign an unmatched receipt</summary><p>Assign only ONE independently verified incoming Testnet XLM receipt whose amount matches this entire invoice exactly. Partial, excess, system funding and second payments are rejected; unmatched transfers remain visible separately for investigation.</p>
       <form onSubmit={e=>{e.preventDefault();void run(async()=>{if(!confirmed)throw Error('Confirm the invoice match first.');setSelected(await api.allocate(selected.id,eventId,note));setEventId('');setNote('');setConfirmed(false);await refresh();});}}><fieldset disabled={busy}>
         <label htmlFor="receipt">Verified incoming receipt</label><select id="receipt" value={eventId} required onChange={e=>{setEventId(e.target.value);setConfirmed(false);}}><option value="">Select a receipt</option>{receipts.map(r=><option value={r.eventId} key={r.eventId}>{xlm(r.amountStroops)} XLM · {r.transactionHash.slice(0,12)} · event {r.eventId.split(':').slice(-2).join(':')}</option>)}</select>
         {eventId&&<p className="mono">{eventId}</p>}
         <label htmlFor="allocation-note">Evidence / reconciliation note</label><textarea id="allocation-note" value={note} minLength={5} maxLength={500} required onChange={e=>setNote(e.target.value)}/>
         <label className="check-label"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/> I have verified this receipt belongs to this invoice. This allocation is recorded in the audit trail.</label>
-        <button disabled={!confirmed||!eventId}>Assign receipt to invoice</button>
+        <button disabled={!confirmed||!eventId||!receipts.some(r=>r.eventId===eventId&&r.amountStroops===selected.amountStroops)}>Assign receipt to invoice</button>
       </fieldset></form>
       {receiptNext&&<button disabled={busy} onClick={()=>void run(async()=>{const p=await api.unmatched(receiptNext);setReceipts(old=>[...old,...p.items]);setReceiptNext(p.nextCursor);})}>Load more unmatched receipts</button>}
-      </details>
+      </details>}
     </section>}
   </section>;
 }
