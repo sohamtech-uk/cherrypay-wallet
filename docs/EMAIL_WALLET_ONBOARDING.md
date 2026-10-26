@@ -19,26 +19,23 @@ There is no user G-wallet or user Stellar secret seed.
 Once the C-wallet is verified, the UI offers **Fund Testnet wallet**. The
 session-authenticated `POST /api/v1/smart-account/funding` accepts only an empty
 object. The server obtains the recipient from that owner's verified deployment.
-It queues exactly **100,000 Testnet XLM (1000000000000 stroops)** once per owner
-and C-address. Repeated requests return the existing allocation. This is an
-allocation receipt, not a claim that the wallet's current balance always remains
-100,000 XLM after spending.
+It requests exactly **10,000 Testnet XLM (100000000000 stroops)** from Stellar
+Friendbot directly to the C-address, once per owner and wallet. Repeated clicks
+return the saved request. The receipt describes the allocation, not the wallet's
+current balance after spending. No user G-account or treasury secret is needed.
 
 ## Runtime configuration
 
-Use the existing automatic deployment configuration, plus the server-only
-`STELLAR_TESTNET_FAUCET_SECRET` for a dedicated, sufficiently funded Testnet
-treasury. It must differ from both the deployment fee source and payment relayer.
-The operator configures this once, never per user. No secret enters the browser.
-`compose.activation.yaml` passes this optional secret to the API; other deployment
-systems must inject it through their secret configuration. Without it, the UI
-explains that funding is not configured and disables the button.
+Funding is available when automatic deployment is configured and passes its
+Testnet preflight. Set `WALLET_TESTNET_FUNDING_ENABLED=false` to pause the funding
+service; it defaults to true. `compose.activation.yaml` exposes this switch.
+The previous `STELLAR_TESTNET_FAUCET_SECRET` is no longer used for new grants.
 
-Native XLM cannot be minted by this application. Friendbot's normal allocation
-is not a 100,000 XLM grant. The operator must provide enough Testnet treasury
-liquidity for the users served, plus fees. This implementation does not automate
-repeated Friendbot requests to manufacture that amount. Insufficient liquidity
-leaves allocations pending; it never substitutes a database balance.
+The fixed provider is https://friendbot.stellar.org/. Stellar documents direct
+C-address support and its 10,000 XLM Testnet allocation at
+https://developers.stellar.org/docs/networks. Friendbot is rate limited and its
+availability is external to Cherry Pay. Never request extra accounts or repeated
+grants to manufacture a larger allocation. Test tokens have no monetary value.
 
 `WALLET_DEPLOYMENT_PILOT_LIMIT` defaults to `0` (no owner-count cap); operators may
 set a cap from 1 to 1000. Deployment remains opt-in with
@@ -48,29 +45,42 @@ one allocation per human, nor proof of mailbox ownership.
 
 ## Reconciliation and operation
 
-Migration 011 stores funding requests and exact signed envelopes. PostgreSQL
-serializes the treasury source across replicas; a submitted row reserves its
-sequence across process restarts. The envelope is committed before broadcasting.
-An RPC timeout retries only the same bytes. An expired transaction with unknown
-outcome remains submitted for operator investigation; never delete its row or
-clear the reservation to issue a replacement without resolving that outcome.
-A committed failure is terminal and requires operator review.
+Migration 012 stores the verified C-recipient, exact amount, starting ledger,
+request state and receipt hash in PostgreSQL. A cross-process advisory lock
+serializes the worker. The SUBMITTED checkpoint is committed **before** making
+one HTTP request. A returned hash is committed before RPC verification. After a
+restart, the worker reconciles that same hash without requesting another grant.
 
-Funding is marked complete only after RPC transaction verification proves a
-successful native XLM SAC transfer with the exact treasury, C-recipient and
-amount. Positive balance, indexer data, or HTTP submission success is insufficient.
-No automatic second allocation is issued after login, spending or a restart.
-Use this treasury only through this worker; external transactions would interfere
-with its source sequence. Rotate its key only after resolving outstanding jobs.
+A timeout, missing provider hash, changed response format, or crash around the
+HTTP call enters `REVIEW_REQUIRED`. Friendbot offers no client idempotency key,
+so the worker must not automatically repeat an uncertain request. The UI shows
+operator review instead of success or a retry button. Preserve the row and
+request timestamp. An operator must locate the provider transaction for that
+request and verify its Testnet native SAC recipient, amount and ledger before
+attaching the receipt hash and resuming reconciliation. If no receipt can be
+established, leave the outcome unresolved; a positive balance alone is not proof.
+A confirmed failed transaction is terminal. Unknown RPC outcomes remain pending.
+
+Only independently verified successful native SAC transfers of exactly 10,000
+XLM to the saved C-address, committed after the starting ledger, become FUNDED.
+HTTP success, indexer data and balance alone are insufficient. Polling is fair
+across owners so one unresolved request does not block another user's grant.
+
+Migration 011 and its old treasury envelopes are preserved unchanged. Existing
+legacy grants block a second grant; confirmed historical receipts retain their
+original amount, while unresolved legacy jobs require operator reconciliation.
+The old treasury worker is no longer configured. Resolve legacy transactions
+before any rollback to an older release; do not run old and new funding workers
+concurrently. Do not remove migration 012 from a database where it has run.
 
 Primary deployment and inbound Testnet funding do not enable spending or certify
 independent backup recovery. Existing activation and recovery checks still apply.
 
 ## Validation boundary
 
-Unit tests cover email routing, exact transaction construction, fee/network checks,
-receipt validation, authenticated funding routes and UI confirmation states.
-PostgreSQL integration tests cover duplicate requests, checkpoint-before-broadcast,
-restart recovery, worker serialization and uncertain outcomes with synthetic chain
-evidence. Real passkey-device and funded live Testnet acceptance must still be run
-in the configured deployment; mocked tests do not prove those steps.
+Unit tests cover the fixed endpoint, Testnet/C-recipient checks, exact receipt
+verification, unavailable/changed provider responses, authenticated routes and
+UI states. PostgreSQL integration tests cover duplicate requests, durable HTTP
+checkpoints, restart reconciliation, concurrent workers and historical grants
+with synthetic evidence. A live Friendbot grant and independently verified RPC
+receipt are separate acceptance evidence; mocked tests do not prove them.

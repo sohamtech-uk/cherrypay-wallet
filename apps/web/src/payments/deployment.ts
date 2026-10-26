@@ -2,7 +2,7 @@ import { addressKind } from './model';
 import { object, text } from './api';
 
 const statuses = ['NOT_STARTED','PENDING','AWAITING_PASSKEY','SUBMITTED','CONFIRMED','ACTIVE','FAILED'];
-export type DeploymentView = { status: string; enabled: boolean; address?: string; transactionHash?: string; ledger?: number; funding?: {status:string;transactionHash?:string} };
+export type DeploymentView = { status: string; enabled: boolean; address?: string; transactionHash?: string; ledger?: number; funding?: {status:string;amountXlm:string;transactionHash?:string} };
 /** A C-address is displayed only when the server reports verified deployment and
  * exact primary binding. It never creates a PaymentAdapter or recovery claim. */
 export function parseDeployment(value: unknown): DeploymentView {
@@ -18,9 +18,10 @@ export function parseDeployment(value: unknown): DeploymentView {
     let funding:DeploymentView['funding'];
     if(data.funding!==undefined) {
       const f=object(data.funding);
-      if(!['AVAILABLE','PENDING','SUBMITTED','FUNDED','FAILED'].includes(String(f.status))||f.amountStroops!=='1000000000000')throw Error('Invalid funding status.');
+      if(!['AVAILABLE','PENDING','SUBMITTED','FUNDED','FAILED','REVIEW_REQUIRED'].includes(String(f.status)) ||
+        !(f.amountStroops==='100000000000' || (['FUNDED','REVIEW_REQUIRED'].includes(String(f.status)) && f.amountStroops==='1000000000000')))throw Error('Invalid funding status.');
       if(f.status==='FUNDED' && (typeof f.transactionHash!=='string'||!/^[a-f0-9]{64}$/.test(f.transactionHash)||!Number.isSafeInteger(f.ledger)||Number(f.ledger)<1))throw Error('Unverified funding receipt.');
-      funding={status:String(f.status),transactionHash:typeof f.transactionHash==='string'?f.transactionHash:undefined};
+      funding={status:String(f.status),amountXlm:f.amountStroops==='100000000000'?'10,000':'100,000',transactionHash:typeof f.transactionHash==='string'?f.transactionHash:undefined};
     }
     return { status, enabled: true, address: data.address, transactionHash: data.transactionHash, ledger: Number(data.confirmedLedger), funding };
   }

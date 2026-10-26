@@ -1,4 +1,4 @@
-import { ContractFundingService, StellarFundingChain } from './contract-funding.js';
+import { FriendbotFundingService, StellarFriendbotChain } from './friendbot-funding.js';
 import { Keypair, rpc } from '@stellar/stellar-sdk';
 import { TESTNET_RPC_URL } from '../config.js';
 import { PaymentError, requireThat } from '../payments/model.js';
@@ -24,7 +24,7 @@ export function publicDeployment(j?: DeploymentJob) {
   };
 }
 export class AutomaticDeploymentService {
-  constructor(readonly store: DeploymentStore, readonly chain: DeploymentChain, readonly funding?: ContractFundingService) {}
+  constructor(readonly store: DeploymentStore, readonly chain: DeploymentChain, readonly funding?: FriendbotFundingService) {}
   async queue(owner: string) { await this.store.queue(owner); return this.status(owner); }
   async status(owner: string) { return {...publicDeployment(await this.store.get(owner)), ...(this.funding ? {funding:await this.funding.status(owner)} : {})}; }
   async tick(): Promise<void> {
@@ -96,11 +96,9 @@ export async function configuredDeployments(env: NodeJS.ProcessEnv = process.env
   const server = new rpc.Server(TESTNET_RPC_URL, { timeout: 20 });
   const chain = new StellarDeploymentChain(server, key, BigInt(fee));
   await chain.preflight();
-  let funding:ContractFundingService|undefined;
-  if(env.STELLAR_TESTNET_FAUCET_SECRET) {
-    const faucet=Keypair.fromSecret(env.STELLAR_TESTNET_FAUCET_SECRET);
-    requireThat(faucet.publicKey()!==key.publicKey()&&(!env.STELLAR_RELAYER_SECRET||faucet.publicKey()!==Keypair.fromSecret(env.STELLAR_RELAYER_SECRET).publicKey()),'FAUCET_REQUIRES_DEDICATED_SOURCE');
-    funding=new ContractFundingService(new StellarFundingChain(server,faucet,async(d,ledger)=>{await chain.verifyBinding(d,ledger);}));
-  }
+  // Friendbot funds verified C-addresses directly; no application treasury is needed.
+  requireThat(env.WALLET_TESTNET_FUNDING_ENABLED === undefined || ['true','false'].includes(env.WALLET_TESTNET_FUNDING_ENABLED), 'INVALID_FUNDING_ENABLE_FLAG');
+  const funding = env.WALLET_TESTNET_FUNDING_ENABLED === 'false' ? undefined
+    : new FriendbotFundingService(new StellarFriendbotChain(server, async(d,ledger)=>{await chain.verifyBinding(d,ledger);}));
   return new AutomaticDeploymentService(store, chain, funding);
 }

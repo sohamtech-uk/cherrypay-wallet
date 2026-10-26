@@ -82,7 +82,7 @@ describe('per-user C-address provisioning reservation', () => {
 });
 
 it('funding requires an authenticated session and cannot take a caller-supplied owner, amount or address',async()=>{
-  const queue=vi.fn(async()=>({status:'PENDING',amountStroops:'1000000000000'}));
+  const queue=vi.fn(async()=>({status:'PENDING',amountStroops:'100000000000'}));
   const app=Fastify({ajv:{customOptions:{removeAdditional:false}}});
   const {AutomaticDeploymentService}=await import('./automatic-deployment.js');
   await registerSmartAccountRoutes(app,{origin:'http://localhost',deployments:{funding:{queue}} as unknown as InstanceType<typeof AutomaticDeploymentService>});
