@@ -1,6 +1,6 @@
 import type { PaymentService } from './service.js';
 /** No overlapping ticks; shutdown drains the active tick before closing persistence. */
-export function startPaymentWorker(service: PaymentService, onError: (code: string) => void, intervalMs = 5000) {
+export function startPaymentWorker(service: Pick<PaymentService,'tick'>, onError: (code: string) => void, intervalMs = 5000) {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Promise<void>;

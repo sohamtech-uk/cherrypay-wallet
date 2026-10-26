@@ -18,6 +18,7 @@ export const paymentSchemas = {
   } },
   intent: { type: 'object', additionalProperties: false, required: ['network', 'destination', 'amountStroops', 'maxFeeStroops'], properties: {
     network: { const: 'TESTNET', type: 'string' }, destination: { type: 'string', minLength: 56, maxLength: 56 }, amountStroops: amountSchema, maxFeeStroops: amountSchema,
+    paymentRequestId: { type: 'string', pattern: '^[a-f0-9-]{36}$' },
   } },
   approval: { type: 'object', additionalProperties: false, required: ['authXdr'], properties: { authXdr: { type: 'string', minLength: 1, maxLength: 16000, pattern: '^[A-Za-z0-9+/]+={0,2}$' } } },
   wallet: { type: 'object', additionalProperties: false, required: ['walletId'], properties: { walletId: identifier } },

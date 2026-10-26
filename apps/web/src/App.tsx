@@ -10,6 +10,8 @@ import { Recovery } from './payments/Recovery';
 import { PaymentContext } from './payments/context';
 import type { PaymentAdapter } from './payments/model';
 import { Receive } from './payments/Receive';
+import { Invoices } from './invoices/Invoices';
+import { InvoiceCheckout } from './invoices/Checkout';
 import { Send } from './payments/Send';
 import { History } from './payments/History';
 import './payments/payments.css';
@@ -35,6 +37,7 @@ function Shell({ children, externalNetwork }: { children: React.ReactNode; exter
         <NavLink end to="/" className={({isActive})=>isActive?'active':''}><LayoutDashboard size={19}/> Dashboard</NavLink>
         <NavLink to="/send" className={({isActive})=>isActive?'active':''}><ArrowUpRight size={19}/> Send</NavLink>
         <NavLink to="/receive" className={({isActive})=>isActive?'active':''}><ArrowDownLeft size={19}/> Receive</NavLink>
+        <NavLink to="/invoices" className={({isActive})=>isActive?'active':''}><Clock3 size={19}/> Invoices</NavLink>
         <NavLink to="/history" className={({isActive})=>isActive?'active':''}><Clock3 size={19}/> Activity</NavLink>
         <NavLink to="/profile" className={({isActive})=>isActive?'active':''}><Settings2 size={19}/> Profile & settings</NavLink>
         <details className="nav-more"><summary>More services</summary>
@@ -74,6 +77,8 @@ export default function App({ paymentAdapter, signer }: { paymentAdapter?: Payme
     <Route path="/onboarding" element={<SetupCard/>}/>
     <Route path="/security" element={<Security/>}/>
     <Route path="/receive" element={<Receive/>}/>
+    <Route path="/invoices" element={<Invoices/>}/>
+    <Route path="/pay/:requestId" element={<InvoiceCheckout/>}/>
     <Route path="/send" element={<Send/>}/>
     <Route path="/payroll" element={<Payroll/>}/>
     <Route path="/history" element={<History/>}/>

@@ -58,6 +58,10 @@ export class PaymentService {
     a.status = 'authorizing'; await this.store.checkpoint(a, token);
     try {
       requireThat(a.prepared && a.prepared.expiresAt > Date.now(), 'QUOTE_EXPIRED');
+      if (a.intent.paymentRequestId) {
+        requireThat(this.store.assertPaymentRequest, 'INVOICE_INTEGRATION_NOT_CONFIGURED', 503);
+        await this.store.assertPaymentRequest(a);
+      }
       const wallet = await this.store.wallet(walletId, owner);
       validateIntent(a.intent, wallet);
       await this.policy(wallet, a.policy);

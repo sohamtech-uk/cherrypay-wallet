@@ -1,4 +1,5 @@
 import { integrationConfig } from './integrations/routes.js';
+import { invoiceWebhookConfig } from './invoices/webhook.js';
 export const STELLAR_NETWORK = 'TESTNET' as const;
 export const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 export const TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
@@ -45,5 +46,5 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env) {
  if (url.pathname !== '/' || url.search || url.hash) throw new Error('WALLET_ORIGIN must be an origin only');
  const rpID = env.WEBAUTHN_RP_ID ?? url.hostname;
  if (rpID !== url.hostname && !url.hostname.endsWith('.' + rpID)) throw new Error('WEBAUTHN_RP_ID must match origin hostname or its parent domain');
- return { origin:url.origin, rpID, port:Number(env.PORT ?? '3001'), network:STELLAR_NETWORK, rpcUrl:TESTNET_RPC_URL, horizonUrl:TESTNET_HORIZON_URL, integrations: integrationConfig(env) };
+ return { origin:url.origin, rpID, port:Number(env.PORT ?? '3001'), network:STELLAR_NETWORK, rpcUrl:TESTNET_RPC_URL, horizonUrl:TESTNET_HORIZON_URL, integrations: integrationConfig(env), invoiceWebhook:invoiceWebhookConfig(env) };
 }
