@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, Clock3, Copy, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Clock3, Copy, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
 import { usePayments } from './context';
 import { explorerLink, NETWORK, xlm, type Attempt, type PaymentAdapter } from './model';
 import { WatchAccount } from '../WatchAccount';
@@ -15,6 +15,8 @@ function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
   const [refresh, setRefresh] = useState(0);
   const [now, setNow] = useState(Date.now);
   const [copyStatus, setCopyStatus] = useState('');
+  const [showAddress, setShowAddress] = useState(false);
+  const [showBalance, setShowBalance] = useState(true);
   useEffect(() => {
     let active = true;
     setLoading(true); setSnapshot(null); setItems([]); setBalanceError(''); setHistoryError('');
@@ -45,16 +47,16 @@ function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
   return <div className="wallet-home">
     <section className="card wallet-hero" aria-label="Connected wallet overview">
       <div className="wallet-hero-top"><span className="wallet-kicker">TOTAL WALLET BALANCE</span><span className="wallet-network"><ShieldCheck size={15}/> Stellar Testnet</span></div>
-      <div className="wallet-hero-balance">{snapshot ? <>{xlm(snapshot.amountStroops)} <span>XLM</span></> : '—'}</div>
+      <div className="wallet-hero-balance">{!showBalance ? '••••••••' : snapshot ? <>{xlm(snapshot.amountStroops)} <span>XLM</span></> : '—'}</div>
       {loading && <p role="status">Loading wallet overview…</p>}
       {!loading && !snapshot && !balanceError && <p>Balance awaiting indexing. No zero balance has been assumed.</p>}
       {balanceError && <p role="alert" className="error">{balanceError}</p>}
       {snapshot && <div className="wallet-balance-meta">Verified ledger {snapshot.ledger} · Updated <time dateTime={new Date(snapshot.updatedAt).toISOString()}>{new Date(snapshot.updatedAt).toLocaleString()}</time>{now - snapshot.updatedAt > 60000 && <p role="status">This balance is over a minute old. Refresh before planning a payment.</p>}</div>}
-      <div className="wallet-hero-actions"><Link to="/send" className="wallet-primary-action"><ArrowUpRight size={18}/> Send XLM</Link><Link to="/receive" className="wallet-primary-action wallet-receive-action"><ArrowDownLeft size={18}/> Receive XLM</Link><button className="wallet-refresh" aria-label="Refresh overview" disabled={loading} onClick={()=>setRefresh(value=>value+1)}><RefreshCw size={18}/></button></div>
+      <button className="wallet-privacy-toggle" aria-pressed={!showBalance} onClick={()=>setShowBalance(v=>!v)}>{showBalance?<EyeOff size={16}/>:<Eye size={16}/>} {showBalance?"Hide balance":"Show balance"}</button><div className="wallet-hero-actions"><Link to="/send" className="wallet-primary-action"><ArrowUpRight size={18}/> Send XLM</Link><Link to="/receive" className="wallet-primary-action wallet-receive-action"><ArrowDownLeft size={18}/> Receive XLM</Link><button className="wallet-refresh" aria-label="Refresh overview" disabled={loading} onClick={()=>setRefresh(value=>value+1)}><RefreshCw size={18}/></button></div>
     </section>
     <section className="card wallet-address-card">
       <div className="wallet-card-heading"><div><span className="eyebrow">YOUR WALLET</span><h2>Stellar smart wallet</h2></div><span className="wallet-pill">Testnet</span></div>
-      <p>Wallet address</p><div className="wallet-address-row"><code className="mono">{adapter.address}</code><button className="secondary-button" onClick={async()=>{try{await navigator.clipboard.writeText(adapter.address);setCopyStatus('Wallet address copied.');}catch{setCopyStatus('Copy unavailable. Select the address to copy manually.');}}}><Copy size={16}/> Copy</button></div><p role="status">{copyStatus}</p>
+      <p>Wallet address</p><div className="wallet-address-row"><code className="mono">{showAddress ? adapter.address : `${adapter.address.slice(0, 5)}••••••••${adapter.address.slice(-5)}`}</code><button className="secondary-button" aria-pressed={showAddress} onClick={()=>setShowAddress(v=>!v)}>{showAddress?<EyeOff size={16}/>:<Eye size={16}/>} {showAddress?"Hide address":"Show address"}</button><button className="secondary-button" onClick={async()=>{try{await navigator.clipboard.writeText(adapter.address);setCopyStatus('Wallet address copied.');}catch{setCopyStatus('Copy unavailable. Select the address to copy manually.');}}}><Copy size={16}/> Copy</button></div><p role="status">{copyStatus}</p>
       <p>Payments use a verified wallet address and require passkey approval. Testnet XLM has no monetary value.</p>
     </section>
     <section className="card wallet-activity" aria-label="Recent verified activity">
