@@ -17,6 +17,29 @@ function payments() {
   return service;
 }
 describe('application payment composition', () => {
+  it('publishes a safe, anonymous, current OpenAPI contract covering identity, wallet, invoice and payment APIs', async () => {
+    const app = await buildApp({ config, logger: false });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/api/v1/openapi.json' });
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['cache-control']).toBe('no-store');
+      const doc = result.json();
+      expect(doc.openapi).toBe('3.1.0');
+      expect(doc.servers).toEqual([{ url: '/', description: expect.any(String) }]);
+      expect(doc.paths['/api/v1/passkeys/onboarding/options'].post.security).toEqual([]);
+      expect(doc.paths['/api/v1/wallet/me'].get.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/smart-account/deployment'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/verify'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/wallets/{walletId}/invoices'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/payment-requests/{requestId}'].get.security).toEqual([]);
+      expect(doc.paths['/api/v1/aurora/capabilities'].get.description).toMatch(/MAINNET/);
+      expect(doc.paths['/api/v1/intelligence/recipient'].get.description).toMatch(/NOT supported/);
+      expect(result.body).not.toContain('AZURE_MAIL_CLIENT_SECRET');
+      expect(result.body).not.toContain('STELLAR_RELAYER_SECRET');
+      expect(identity.sessionAccount).not.toHaveBeenCalled();
+      expect((await app.inject({ url: '/api/v1/openapi.json?unexpected=1' })).statusCode).toBe(400);
+    } finally { await app.close(); }
+  });
   it('keeps external integrations gated and enforces origin on quote creation', async () => {
     const app = await buildApp({ config, logger: false });
     try {
