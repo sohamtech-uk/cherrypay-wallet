@@ -36,8 +36,8 @@ async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<
 /** Dedicated deployment fee source, separate from the payment relayer.
  * No SQL transaction or row lock is held while an RPC request executes. */
 export class PostgresDeploymentStore implements DeploymentStore {
-  constructor(readonly publicKey: string, readonly pool: Pool = db, readonly limit = 100) {
-    requireThat(Number.isSafeInteger(limit) && limit > 0 && limit <= 1000, 'INVALID_DEPLOYMENT_LIMIT');
+  constructor(readonly publicKey: string, readonly pool: Pool = db, readonly limit = 0) {
+    requireThat(Number.isSafeInteger(limit) && limit >= 0 && limit <= 1000, 'INVALID_DEPLOYMENT_LIMIT');
   }
   async get(owner: string): Promise<DeploymentJob | undefined> {
     const { rows } = await this.pool.query<Row>('SELECT * FROM wallet_deployment_jobs WHERE account_id=$1', [owner]);
@@ -64,7 +64,7 @@ export class PostgresDeploymentStore implements DeploymentStore {
         return job(result.rows[0]);
       }
       const count = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM wallet_deployment_jobs WHERE descriptor->>'deployerPublicKey'=$1", [this.publicKey]);
-      requireThat(count.rows[0].count < this.limit, 'DEPLOYMENT_PILOT_LIMIT_REACHED', 429);
+      requireThat(this.limit === 0 || count.rows[0].count < this.limit, 'DEPLOYMENT_PILOT_LIMIT_REACHED', 429);
       const descriptor = deploymentDescriptor(owner, credentials.rows[0], this.publicKey);
       const result = await client.query<Row>(`INSERT INTO wallet_deployment_jobs(account_id,status,descriptor) VALUES($1,'PENDING',$2::jsonb)
         ON CONFLICT(account_id) DO UPDATE SET status='PENDING',descriptor=EXCLUDED.descriptor,updated_at=NOW(),next_attempt_at=NOW(),failure_code=NULL RETURNING *`, [owner, JSON.stringify(descriptor)]);

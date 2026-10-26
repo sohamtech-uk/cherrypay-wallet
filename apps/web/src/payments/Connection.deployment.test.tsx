@@ -14,9 +14,9 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const pending = () => response({ status: 'PENDING', address: null, transactionHash: null, deploymentEnabled: false }, 202);
-function fixture(deployment: () => Promise<Response>, seconds = 1800) {
+function fixture(deployment: () => Promise<Response>, seconds = 1800, mode = 'authenticate') {
   const fetcher = vi.fn(async (url: string) => {
-    if (url.endsWith('/options')) return response({ accountID: 'alice@example.com', requestID: 'challenge', options: { challenge: 'challenge' } });
+    if (url.endsWith('/options')) return response({ mode, accountID: 'alice@example.com', requestID: 'challenge', options: { challenge: 'challenge' } });
     if (url.endsWith('/verify')) return response({ verified: true, accountID: 'alice@example.com', token: 'secret-session', expiresInSeconds: seconds, credentialCount: 1 });
     if (url.endsWith('/wallets')) return response({ network: 'TESTNET', items: [] });
     if (url.endsWith('/smart-account/deployment')) return deployment();
@@ -28,7 +28,7 @@ function fixture(deployment: () => Promise<Response>, seconds = 1800) {
 }
 async function signIn(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Email address (Account ID)'), 'alice@example.com');
-  await user.click(screen.getByRole('button', { name: 'Connect with passkey' }));
+  await user.click(screen.getByRole('button', { name: 'Continue with email' }));
 }
 
 it.each(['unavailable', 'missing-status', 'unknown-status', 'unexpected-enablement'])('keeps a verified profile connected when deployment status is %s', async failure => {
@@ -52,10 +52,10 @@ it.each(['unavailable', 'missing-status', 'unknown-status', 'unexpected-enableme
 });
 
 it('keeps a newly enrolled profile usable when the reservation request times out', async () => {
-  const fetcher = fixture(async () => { throw Error('Network timeout'); });
+  const fetcher = fixture(async () => { throw Error('Network timeout'); },1800,'register');
   const user = userEvent.setup(); render(<PaymentConnection onConnect={vi.fn()}/>);
   await user.type(screen.getByLabelText('Email address (Account ID)'), 'alice@example.com');
-  await user.click(screen.getByRole('button', { name: 'Create passkey profile' }));
+  await user.click(screen.getByRole('button', { name: 'Continue with email' }));
   await screen.findByRole('alert');
   expect(screen.getByText(/1 passkey enrolled/)).toBeTruthy();
   expect(localStorage.getItem('cherrypay:testnet:account-id')).toBe('alice@example.com');
@@ -72,7 +72,7 @@ it('ignores a pending deployment response after disconnect', async () => {
   expect(complete).toBeDefined();
   await user.click(screen.getByRole('button', { name: 'Disconnect wallet' }));
   await act(async () => { complete!(pending()); });
-  expect(screen.getByRole('button', { name: 'Connect with passkey' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Continue with email' })).toBeTruthy();
   expect(screen.queryByText(/Provisioning status/)).toBeNull();
   expect(screen.queryByText(/1 passkey enrolled/)).toBeNull();
   expect(onConnect.mock.calls.every(([value]) => value === null)).toBe(true);
@@ -84,7 +84,7 @@ it('ignores deployment responses after the authenticated session expires', async
   fixture(() => new Promise(resolve => { complete = resolve; }), 1);
   const onConnect = vi.fn(); render(<PaymentConnection onConnect={onConnect}/>);
   fireEvent.change(screen.getByLabelText('Email address (Account ID)'), { target: { value: 'alice@example.com' } });
-  await act(async () => { fireEvent.submit(screen.getByRole('button', { name: 'Connect with passkey' }).closest('form')!); });
+  await act(async () => { fireEvent.submit(screen.getByRole('button', { name: 'Continue with email' }).closest('form')!); });
   expect(complete).toBeDefined();
   await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
   expect(screen.getByRole('alert').textContent).toContain('session expired');
@@ -92,4 +92,28 @@ it('ignores deployment responses after the authenticated session expires', async
   expect(screen.queryByText(/Provisioning status/)).toBeNull();
   expect(screen.queryByText(/1 passkey enrolled/)).toBeNull();
   expect(onConnect.mock.calls.every(([value]) => value === null)).toBe(true);
+});
+
+it('offers funding only after verified deployment and replaces the prompt with a verified allocation receipt',async()=>{
+  const {StrKey}=await import('@stellar/stellar-sdk');
+  let funding:Record<string,unknown>={status:'AVAILABLE',amountStroops:'1000000000000'};
+  const deployed=()=>response({status:'CONFIRMED',network:'TESTNET',deploymentEnabled:true,spendingEnabled:false,recoveryReady:false,onChainSignerBound:true,address:StrKey.encodeContract(Buffer.alloc(32,1)),transactionHash:'a'.repeat(64),confirmedLedger:200,primaryRuleId:0,primaryCredentialId:'primary',funding});
+  const fetcher=fixture(async()=>deployed()),original=fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async url=>{
+    if(url.endsWith('/smart-account/funding')){funding={...funding,status:'SUBMITTED'};return response(funding,202);}return original(url);
+  });
+  const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);await signIn(user);
+  await user.click(await screen.findByRole('button',{name:'Fund Testnet wallet'}));
+  await screen.findByText(/allocation is pending confirmation/);
+  expect(fetcher.mock.calls.filter(([url])=>url.endsWith('/smart-account/funding'))).toHaveLength(1);
+  expect(screen.queryByRole('button',{name:'Fund Testnet wallet'})).toBeNull();
+  funding={...funding,status:'FUNDED',ledger:201,transactionHash:'b'.repeat(64)};
+  await user.click(screen.getByRole('button',{name:'Refresh deployment status'}));
+  await screen.findByText(/100,000 Testnet XLM allocated/);
+  expect(screen.getByRole('link',{name:'View funding transaction'}).getAttribute('href')).toContain('b'.repeat(64));
+});
+it('never creates a new passkey when an existing user cancels authentication',async()=>{
+  fixture(async()=>pending());vi.mocked(startAuthentication).mockRejectedValueOnce(new DOMException('Cancelled','NotAllowedError'));
+  const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);await signIn(user);
+  await screen.findByRole('alert');expect(startRegistration).not.toHaveBeenCalled();
 });

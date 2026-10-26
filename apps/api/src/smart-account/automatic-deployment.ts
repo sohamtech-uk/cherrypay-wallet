@@ -1,3 +1,4 @@
+import { ContractFundingService, StellarFundingChain } from './contract-funding.js';
 import { Keypair, rpc } from '@stellar/stellar-sdk';
 import { TESTNET_RPC_URL } from '../config.js';
 import { PaymentError, requireThat } from '../payments/model.js';
@@ -23,9 +24,9 @@ export function publicDeployment(j?: DeploymentJob) {
   };
 }
 export class AutomaticDeploymentService {
-  constructor(readonly store: DeploymentStore, readonly chain: DeploymentChain) {}
-  async queue(owner: string) { return publicDeployment(await this.store.queue(owner)); }
-  async status(owner: string) { return publicDeployment(await this.store.get(owner)); }
+  constructor(readonly store: DeploymentStore, readonly chain: DeploymentChain, readonly funding?: ContractFundingService) {}
+  async queue(owner: string) { await this.store.queue(owner); return this.status(owner); }
+  async status(owner: string) { return {...publicDeployment(await this.store.get(owner)), ...(this.funding ? {funding:await this.funding.status(owner)} : {})}; }
   async tick(): Promise<void> {
     let current = await this.store.claim();
     if (!current) return;
@@ -64,7 +65,7 @@ export class AutomaticDeploymentService {
     let running: Promise<void> = Promise.resolve();
     const run = () => {
       if (stopped) return;
-      running = this.tick().catch(() => onError('AUTOMATIC_DEPLOYMENT_WORKER_UNAVAILABLE')).finally(() => {
+      running = this.tick().then(() => this.funding?.tick()).catch(() => onError('AUTOMATIC_DEPLOYMENT_WORKER_UNAVAILABLE')).finally(() => {
         if (!stopped) { timer = setTimeout(run, 5000); timer.unref?.(); }
       });
     };
@@ -90,9 +91,16 @@ export async function configuredDeployments(env: NodeJS.ProcessEnv = process.env
   }
   const fee = env.WALLET_DEPLOYMENT_MAX_FEE_STROOPS ?? '100000000';
   requireThat(/^[1-9][0-9]{0,8}$/.test(fee) && BigInt(fee) <= 500000000n, 'INVALID_DEPLOYMENT_FEE_CAP');
-  const limit = Number(env.WALLET_DEPLOYMENT_PILOT_LIMIT ?? '100');
+  const limit = Number(env.WALLET_DEPLOYMENT_PILOT_LIMIT ?? '0');
   const store = new PostgresDeploymentStore(key.publicKey(), undefined, limit);
-  const chain = new StellarDeploymentChain(new rpc.Server(TESTNET_RPC_URL, { timeout: 20 }), key, BigInt(fee));
+  const server = new rpc.Server(TESTNET_RPC_URL, { timeout: 20 });
+  const chain = new StellarDeploymentChain(server, key, BigInt(fee));
   await chain.preflight();
-  return new AutomaticDeploymentService(store, chain);
+  let funding:ContractFundingService|undefined;
+  if(env.STELLAR_TESTNET_FAUCET_SECRET) {
+    const faucet=Keypair.fromSecret(env.STELLAR_TESTNET_FAUCET_SECRET);
+    requireThat(faucet.publicKey()!==key.publicKey()&&(!env.STELLAR_RELAYER_SECRET||faucet.publicKey()!==Keypair.fromSecret(env.STELLAR_RELAYER_SECRET).publicKey()),'FAUCET_REQUIRES_DEDICATED_SOURCE');
+    funding=new ContractFundingService(new StellarFundingChain(server,faucet,async(d,ledger)=>{await chain.verifyBinding(d,ledger);}));
+  }
+  return new AutomaticDeploymentService(store, chain, funding);
 }

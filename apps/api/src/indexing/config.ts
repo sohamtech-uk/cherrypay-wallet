@@ -11,7 +11,7 @@ export function configuredIndexer(env: NodeJS.ProcessEnv = process.env) {
   let signer: Keypair;
   try { signer = Keypair.fromSecret(env.WALLET_INDEXER_SIGNING_SECRET); }
   catch { throw Error('INVALID_INDEXER_SIGNING_SECRET'); }
-  for (const secret of [env.STELLAR_RELAYER_SECRET, env.STELLAR_DEPLOYER_SECRET]) {
+  for (const secret of [env.STELLAR_RELAYER_SECRET, env.STELLAR_DEPLOYER_SECRET, env.STELLAR_TESTNET_FAUCET_SECRET]) {
     requireThat(!secret || secret !== env.WALLET_INDEXER_SIGNING_SECRET, 'INDEXER_REQUIRES_SEPARATE_KEY');
   }
   return new WalletBackendClient(env.WALLET_INDEXER_URL, fetch, signer);

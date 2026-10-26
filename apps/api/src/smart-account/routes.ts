@@ -42,6 +42,16 @@ export async function registerSmartAccountRoutes(app: FastifyInstance, options: 
       return reply.code(503).send({ error: 'DEPLOYMENT_SERVICE_UNAVAILABLE' });
     }
   });
+  app.post('/api/v1/smart-account/funding', {schema:{body:emptyBody}}, async(request,reply)=>{
+    reply.header('Cache-Control','no-store');
+    if(options.origin&&request.headers.origin!==options.origin)return reply.code(403).send({error:'UNTRUSTED_ORIGIN'});
+    const bearer=request.headers.authorization;
+    const owner=await sessionAccount(bearer?.startsWith('Bearer ')?bearer.slice(7):undefined);
+    if(!owner)return reply.code(401).send({error:'AUTHENTICATION_REQUIRED'});
+    if(!options.deployments?.funding)return reply.code(503).send({error:'TESTNET_FUNDING_NOT_CONFIGURED'});
+    try{return reply.code(202).send(await options.deployments.funding.queue(owner));}
+    catch(error){if(error instanceof PaymentError)return reply.code(error.status).send({error:error.code});return reply.code(503).send({error:'TESTNET_FUNDING_UNAVAILABLE'});}
+  });
   app.get('/api/v1/smart-account/deployment', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {

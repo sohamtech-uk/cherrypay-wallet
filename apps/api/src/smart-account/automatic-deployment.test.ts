@@ -116,7 +116,7 @@ describe('deployment configuration', () => {
     await expect(configuredDeployments({...env,STELLAR_DEPLOYER_PUBLIC_KEY:other.publicKey()})).rejects.toThrow('DEPLOYER_PUBLIC_KEY_MISMATCH');
     await expect(configuredDeployments({...env,STELLAR_RELAYER_SECRET:key.secret()})).rejects.toThrow('DEPLOYER_MUST_DIFFER');
     await expect(configuredDeployments({...env,WALLET_DEPLOYMENT_MAX_FEE_STROOPS:'500000001'})).rejects.toThrow('INVALID_DEPLOYMENT_FEE_CAP');
-    await expect(configuredDeployments({...env,WALLET_DEPLOYMENT_PILOT_LIMIT:'0'})).rejects.toThrow('INVALID_DEPLOYMENT_LIMIT');
+    await expect(configuredDeployments({...env,WALLET_DEPLOYMENT_PILOT_LIMIT:'-1'})).rejects.toThrow('INVALID_DEPLOYMENT_LIMIT');
     expect(preflight).not.toHaveBeenCalled();
     expect(await configuredDeployments({...env,STELLAR_RELAYER_SECRET:other.secret()})).toBeInstanceOf(AutomaticDeploymentService);
     expect(preflight).toHaveBeenCalledTimes(1);

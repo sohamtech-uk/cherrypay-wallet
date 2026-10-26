@@ -16,7 +16,7 @@ This change integrates the automatic primary deployment worker from PR #41 with 
 Use `compose.activation.yaml` with the normal Compose file. Defaults disable deployment and indexer. The payment runtime still uses the separate reviewed manifest in `compose.payments.yaml`.
 
 - `WALLET_DEPLOYMENTS_ENABLED=true`, `STELLAR_DEPLOYER_PUBLIC_KEY`, and `STELLAR_DEPLOYER_SECRET`: dedicated funded Testnet fee source. Never reuse the payment relayer source; sequence reservations are independent.
-- `WALLET_DEPLOYMENT_PILOT_LIMIT`: default 100 owners; `WALLET_DEPLOYMENT_MAX_FEE_STROOPS`: default 100000000, maximum 500000000. These are ceilings, not quoted costs.
+- `WALLET_DEPLOYMENT_PILOT_LIMIT`: default 0 (no owner-count cap); optionally 1–1000 owners; `WALLET_DEPLOYMENT_MAX_FEE_STROOPS`: default 100000000, maximum 500000000. These are ceilings, not quoted costs.
 - `WALLET_INDEXER_ENABLED=true`, `WALLET_INDEXER_NETWORK=TESTNET`, `WALLET_INDEXER_URL` ending in `/graphql/query`, and `WALLET_INDEXER_SIGNING_SECRET`: separate unfunded request-authentication key. Configure its public key in Wallet Backend `CLIENT_AUTH_PUBLIC_KEYS`. Never put these values in browser configuration or commit them.
 - Pin and build an audited Wallet Backend commit. `main` documentation describes unreleased behavior; the latest-release API returned 404 when checked on 2026-10-25. Do not assume a `v1.0.0` image exists because a README example mentions it.
 
@@ -50,3 +50,5 @@ flowchart TD
 ```
 
 Sources: [Wallet Backend authentication](https://github.com/stellar/wallet-backend/blob/main/docs/api/authentication.md), [Wallet Backend deployment guide](https://github.com/stellar/wallet-backend/blob/main/docs/deploy/README.md). Follow documentation at the exact source commit used in the deployment.
+
+Email-first sign-in and the optional 100,000 XLM Testnet funding prompt are described in [email wallet onboarding](EMAIL_WALLET_ONBOARDING.md).
