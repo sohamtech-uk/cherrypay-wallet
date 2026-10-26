@@ -46,7 +46,7 @@ it('requires exact payment review and recovers an approval timeout by reading th
 it('saving a pay run never invokes the signer',async () => {
   const adapter=fixture(),user=userEvent.setup(); mount(adapter);
   await user.type(screen.getByLabelText('Unique pay run reference'),'october');
-  await user.type(screen.getByLabelText('Recipients: reference, address, XLM amount'),`employee-1,${destination},1.0000001`);
+  await user.type(screen.getByLabelText('Recipients: reference, Stellar address or verified email, XLM amount'),`employee-1,${destination},1.0000001`);
   await user.click(screen.getByRole('button',{name:'Save pay run'}));
   await screen.findByRole('heading',{name:'october'});
   expect(adapter.payroll!.create).toHaveBeenCalledWith({network:'TESTNET',reference:'october',maxFeeStroops:'10000000',items:[{reference:'employee-1',destination,amountStroops:'10000001'}]});
