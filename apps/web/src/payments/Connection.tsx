@@ -115,7 +115,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     try {
       const challenge = object(await api('passkeys/onboarding/options', {email:owner}));
       if (generation.current !== id) return;
-      if (challenge.accountID !== owner || !['register','authenticate'].includes(String(challenge.mode)))) throw Error('Invalid sign-in response.');
+      if (challenge.accountID !== owner || !['register','authenticate'].includes(String(challenge.mode))) throw Error('Invalid sign-in response.');
       creating = challenge.mode === 'register';
       setAccountId(owner);
       try {localStorage.setItem(accountStorageKey,owner);} catch {setNotice('This browser cannot save your account ID. Use your email to sign in again.');}
