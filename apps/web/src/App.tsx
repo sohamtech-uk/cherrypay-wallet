@@ -1,5 +1,6 @@
 import { Payroll } from './payments/Payroll';
 import { WalletShell } from './WalletShell';
+import { ApiReference } from './developers/ApiReference';
 import { Business } from './invoices/Business';
 import { useWalletAccount } from './payments/account-context';
 import { usePayments } from './payments/context';
@@ -25,7 +26,7 @@ import { CircleHelp, KeyRound, LockKeyhole } from 'lucide-react';
 
 function RouteContent({children, external}: {children: React.ReactNode; external: boolean}) {
   const account = useWalletAccount(), adapter = usePayments(), {pathname} = useLocation();
-  if (account && !adapter && !external && !pathname.startsWith('/pay/') && !['/profile','/security'].includes(pathname) && (!account.authenticated || pathname !== '/receive')) return null;
+  if (account && !adapter && !external && !pathname.startsWith('/pay/') && !['/profile','/security','/developers','/api-docs'].includes(pathname) && (!account.authenticated || pathname !== '/receive')) return null;
   return children;
 }
 function SetupCard() { return <section className="card payment-screen"><h1>Ready for your first payment?</h1><p>Receive XLM using your wallet address, or review and approve a payment with your passkey.</p><div className="actions"><Link className="primary-link" to="/">Open dashboard</Link><Link className="secondary-button" to="/receive">Receive XLM</Link></div></section>; }
@@ -48,6 +49,8 @@ export default function App({ paymentAdapter, signer }: { paymentAdapter?: Payme
     <Route path="/profile" element={<Profile/>}/>
     <Route path="/onboarding" element={<SetupCard/>}/>
     <Route path="/security" element={<Security/>}/>
+    <Route path="/developers" element={<ApiReference/>}/>
+    <Route path="/api-docs" element={<ApiReference/>}/>
     <Route path="/receive" element={<Receive/>}/>
     <Route path="/business" element={<Business/>}/>
     <Route path="/invoices" element={<Invoices/>}/>
