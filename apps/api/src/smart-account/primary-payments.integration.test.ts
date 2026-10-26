@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '../store.js';
@@ -18,7 +18,7 @@ integration('automatic primary payment activation (synthetic database evidence)'
     await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[f.owner,randomUUID()]);
     await pool.query('INSERT INTO wallet_credentials(id,account_id,public_key) VALUES($1,$2,$3)',[f.credential.id,f.owner,f.credential.public_key]);
     await pool.query(`INSERT INTO wallet_deployment_jobs(account_id,status,contract_address,descriptor,transaction_hash,confirmed_ledger,signer_rule_id,binding_verified_at)
-      VALUES($1,'CONFIRMED',$2,$3,$4,300,0,NOW())`,[f.owner,f.descriptor.address,JSON.stringify(f.descriptor),'a'.repeat(64)]);
+      VALUES($1,'CONFIRMED',$2,$3,$4,300,0,NOW())`,[f.owner,f.descriptor.address,JSON.stringify(f.descriptor),randomBytes(32).toString('hex')]);
     return f;
   }
   it('activates each verified owner idempotently under concurrent requests',async()=>{
