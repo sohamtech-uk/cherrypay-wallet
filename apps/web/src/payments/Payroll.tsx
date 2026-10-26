@@ -120,7 +120,7 @@ function PayRunScreen({ adapter }: { adapter: PaymentAdapter }) {
       </section>}
     </section>}
     <h2>Saved pay runs</h2><button disabled={busy} onClick={() => void act(async live => { const page = await payroll.list(); if (live()) { setRuns(page.items); setCursor(page.nextCursor); } })}>Refresh saved runs</button>
-    <ul>{runs.map(r => <li key={r.id}><button disabled={busy} onClick={() => void act(async live => { const value = await payroll.get(r.id); if (live()) { setCurrent(value); setQuote(undefined); setAccepted(false); } })}>{r.reference} · {r.recipientCount} recipients</button></li>)}</ul>
+    <ul>{runs.map(r => <li key={r.id}><button disabled={busy} onClick={() => void act(async live => { const value = await payroll.get(r.id); if (live()) { setCurrent(value); setQuote(undefined); setAccepted(false); setAliases({}); } })}>{r.reference} · {r.recipientCount} recipients</button></li>)}</ul>
     {cursor && <button disabled={busy} onClick={() => void act(async live => { const page = await payroll.list(cursor); if (live()) { setRuns(old => [...old,...page.items.filter(r => !old.some(o => o.id === r.id))]); setCursor(page.nextCursor); } })}>Load more runs</button>}
     {current && <button disabled={busy} onClick={() => { setCurrent(undefined); setQuote(undefined); setAccepted(false); setReference(''); setRecipients(''); setAliases({}); }}>New pay run</button>}
   </section>;
