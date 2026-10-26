@@ -96,21 +96,33 @@ it('ignores deployment responses after the authenticated session expires', async
 
 it('offers funding only after verified deployment and replaces the prompt with a verified allocation receipt',async()=>{
   const {StrKey}=await import('@stellar/stellar-sdk');
-  let funding:Record<string,unknown>={status:'AVAILABLE',amountStroops:'1000000000000'};
+  let funding:Record<string,unknown>={status:'AVAILABLE',amountStroops:'100000000000'};
   const deployed=()=>response({status:'CONFIRMED',network:'TESTNET',deploymentEnabled:true,spendingEnabled:false,recoveryReady:false,onChainSignerBound:true,address:StrKey.encodeContract(Buffer.alloc(32,1)),transactionHash:'a'.repeat(64),confirmedLedger:200,primaryRuleId:0,primaryCredentialId:'primary',funding});
   const fetcher=fixture(async()=>deployed()),original=fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async url=>{
     if(url.endsWith('/smart-account/funding')){funding={...funding,status:'SUBMITTED'};return response(funding,202);}return original(url);
   });
   const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);await signIn(user);
+  await screen.findByText(/one-time allocation of 10,000 Testnet XLM/);
+  expect(fetcher.mock.calls.filter(([url])=>url.endsWith('/smart-account/funding'))).toHaveLength(0);
   await user.click(await screen.findByRole('button',{name:'Fund Testnet wallet'}));
   await screen.findByText(/allocation is pending confirmation/);
   expect(fetcher.mock.calls.filter(([url])=>url.endsWith('/smart-account/funding'))).toHaveLength(1);
   expect(screen.queryByRole('button',{name:'Fund Testnet wallet'})).toBeNull();
   funding={...funding,status:'FUNDED',ledger:201,transactionHash:'b'.repeat(64)};
   await user.click(screen.getByRole('button',{name:'Refresh deployment status'}));
-  await screen.findByText(/100,000 Testnet XLM allocated/);
+  await screen.findByText(/10,000 Testnet XLM allocated/);
   expect(screen.getByRole('link',{name:'View funding transaction'}).getAttribute('href')).toContain('b'.repeat(64));
+});
+it('shows an unresolved grant without a second funding button',async()=>{
+  const {StrKey}=await import('@stellar/stellar-sdk');
+  fixture(async()=>response({status:'CONFIRMED',network:'TESTNET',deploymentEnabled:true,spendingEnabled:false,recoveryReady:false,
+    onChainSignerBound:true,address:StrKey.encodeContract(Buffer.alloc(32,1)),transactionHash:'a'.repeat(64),confirmedLedger:200,
+    primaryRuleId:0,primaryCredentialId:'primary',funding:{status:'REVIEW_REQUIRED',amountStroops:'100000000000'}}));
+  const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);await signIn(user);
+  await screen.findByText(/Funding confirmation needs operator review/);
+  expect(screen.queryByRole('button',{name:'Fund Testnet wallet'})).toBeNull();
+  expect(screen.queryByText(/XLM allocated/)).toBeNull();
 });
 it('never creates a new passkey when an existing user cancels authentication',async()=>{
   fixture(async()=>pending());vi.mocked(startAuthentication).mockRejectedValueOnce(new DOMException('Cancelled','NotAllowedError'));

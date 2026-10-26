@@ -223,10 +223,11 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
         <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
       </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       {deployment?.address && <div aria-label="Testnet funding">
-        {deployment.funding?.status === 'FUNDED' ? <p role="status">100,000 Testnet XLM allocated. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.funding.transactionHash}`} target="_blank" rel="noreferrer">View funding transaction</a></p>
-          : deployment.funding?.status === 'PENDING' || deployment.funding?.status === 'SUBMITTED' ? <p role="status">Your 100,000 Testnet XLM allocation is pending confirmation.</p>
+        {deployment.funding?.status === 'FUNDED' ? <p role="status">{deployment.funding.amountXlm} Testnet XLM allocated. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.funding.transactionHash}`} target="_blank" rel="noreferrer">View funding transaction</a></p>
+          : deployment.funding?.status === 'PENDING' || deployment.funding?.status === 'SUBMITTED' ? <p role="status">Your 10,000 Testnet XLM allocation is pending confirmation.</p>
+          : deployment.funding?.status === 'REVIEW_REQUIRED' ? <p role="alert">Funding confirmation needs operator review. Your request will not be repeated automatically.</p>
           : deployment.funding?.status === 'FAILED' ? <p role="alert">The Testnet funding transaction failed. Contact the operator for review.</p>
-          : <><p>Your C-wallet is ready. Request a one-time allocation of 100,000 Testnet XLM. Test tokens have no monetary value.</p>
+          : <><p>Your C-wallet is ready. Request a one-time allocation of 10,000 Testnet XLM. Test tokens have no monetary value.</p>
             <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
