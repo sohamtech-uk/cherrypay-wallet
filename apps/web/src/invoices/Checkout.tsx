@@ -32,8 +32,10 @@ export function InvoiceCheckout() {
       {error&&<button onClick={()=>setRevision(x=>x+1)}>Reload invoice</button>}
       {invoice&&<><h2>{invoice.merchantName}</h2><dl><dt>Invoice</dt><dd>{invoice.invoiceReference}</dd><dt>Invoice total</dt><dd>{xlm(invoice.amountStroops)} Testnet XLM</dd><dt>Received and allocated</dt><dd>{xlm(invoice.paidStroops)} XLM</dd><dt>Remaining</dt><dd>{xlm(invoice.remainingStroops)} XLM</dd><dt>Receiving wallet</dt><dd className="mono">{invoice.destination}</dd><dt>Expires</dt><dd>{new Date(invoice.expiresAt).toLocaleString()}</dd></dl>
         <p role="status">{invoice.status.replaceAll('_',' ')}{invoice.expired?' · Payment link expired':''}{invoice.paymentPending?' · A payment is being resolved':''}</p>
+        {invoice.status!=='unpaid'&&<p role="status">Invoice already paid or allocated. This unique invoice QR has been used and no further checkout payment is permitted.</p>}
+        {invoice.paymentPending&&<p role="status">A payment is awaiting resolution. Other payers cannot start a replacement; check the existing payment instead.</p>}
         <p>The merchant name is supplied by the wallet owner. Confirm the merchant and invoice before approving. Testnet XLM has no real-world value.</p>
-        {!adapter&&<p>Sign in above with your email and passkey to pay this invoice. The invoice will remain open here.</p>}
+        {!adapter&&invoice.status==='unpaid'&&!invoice.expired&&!invoice.paymentPending&&<p>Sign in above with your email and passkey to pay this invoice. The invoice will remain open here.</p>}
       </>}
     </section>
     {invoice&&adapter&&<Send request={invoice} checkoutUnavailable={!!error}/>}
