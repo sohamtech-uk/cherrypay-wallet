@@ -45,6 +45,24 @@ function SendForm() {
     if (value.network !== NETWORK || value.from !== adapter.address) throw new Error('Wallet service returned an attempt for a different wallet or network.');
     return value;
   }
+  const polling = !!key && key !== 'storage-unavailable' && (!attempt || ['submitted','pending','unknown'].includes(attempt.status));
+  useEffect(() => {
+    if (!polling) return;
+    let active = true, inFlight = false;
+    const poll = async () => {
+      if (inFlight || mutex.current) return;
+      inFlight = true;
+      try {
+        const result = await adapter.getAttemptByKey(key);
+        if (active && result) { setAttempt(validateAttempt(result)); setError(''); }
+      } catch {
+        // Keep the last durable status visible; the next interval retries the read.
+      } finally { inFlight = false; }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [adapter, key, polling]);
   const terminal = attempt && (attempt.status === 'failed' || attempt.status === 'rejected' || (attempt.status === 'confirmed' && attempt.verified));
   return <section className="card payment-screen"><span className="eyebrow">STELLAR TESTNET</span><h1>Send XLM</h1>
     <p>Review the exact destination, amount and fee before approving with your wallet.</p>
@@ -81,7 +99,7 @@ function SendForm() {
     </section>}
     {key && <section aria-label="Payment status"><h2>Payment status</h2><p role="status">{busy ? 'Waiting for wallet service or approval…' : attempt ? statusLabel(attempt) : 'Outcome unknown — recover the existing attempt before starting another payment.'}</p>
       {attempt && <><p>{attempt.failureMessage}</p><p className="mono">Attempt: {attempt.id}</p><Link className="secondary-button" to={`/history/${encodeURIComponent(attempt.id)}`}>View payment detail</Link>{explorerLink(attempt) && <a className="secondary-button" href={explorerLink(attempt)} target="_blank" rel="noreferrer">Verified Testnet receipt</a>}</>}
-      <p>Checking status never resubmits a payment. If approval was interrupted, review the existing attempt with your wallet service.</p>
+      <p>{polling ? 'Status refreshes automatically every 5 seconds while confirmation is unresolved. ' : ''}Checking status never creates or resubmits a replacement payment. If approval was interrupted, review the existing attempt with your wallet service.</p>
       <div className="actions"><button disabled={busy || key === 'storage-unavailable'} onClick={() => void run(async () => { const result = await adapter.getAttemptByKey(key); if (!result) throw new Error('The attempt is not yet available. Check again later; do not submit a replacement.'); setAttempt(validateAttempt(result)); })}>Check existing attempt</button>
       {!terminal && key !== 'storage-unavailable' && adapter.resetAttempt && <button className="secondary-button" disabled={busy} onClick={()=>void run(async()=>{
         await adapter.resetAttempt!(key);
