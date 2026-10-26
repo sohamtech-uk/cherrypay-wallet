@@ -2,14 +2,15 @@ import { addressKind } from './model';
 import { object, text } from './api';
 
 const statuses = ['NOT_STARTED','PENDING','AWAITING_PASSKEY','SUBMITTED','CONFIRMED','ACTIVE','FAILED'];
-export type DeploymentView = { status: string; enabled: boolean; address?: string; transactionHash?: string; ledger?: number; funding?: {status:string;transactionHash?:string} };
+export type DeploymentView = { status: string; enabled: boolean; spendingEnabled?:boolean; walletId?:string; address?: string; transactionHash?: string; ledger?: number; funding?: {status:string;amountXlm:string;transactionHash?:string} };
 /** A C-address is displayed only when the server reports verified deployment and
- * exact primary binding. It never creates a PaymentAdapter or recovery claim. */
+ * exact primary binding. Payment access additionally requires owned-wallet discovery;
+ * deployment never establishes backup recovery. */
 export function parseDeployment(value: unknown): DeploymentView {
   const data = object(value), status = text(data.status);
   if (!statuses.includes(status) || typeof data.deploymentEnabled !== 'boolean') throw Error('Invalid deployment status.');
   if (!data.deploymentEnabled) return { status, enabled: false };
-  if (data.network !== 'TESTNET' || data.spendingEnabled !== false || data.recoveryReady !== false || typeof data.onChainSignerBound !== 'boolean') throw Error('Invalid deployment boundary.');
+  if (data.network !== 'TESTNET' || typeof data.spendingEnabled !== 'boolean' || data.recoveryReady !== false || typeof data.onChainSignerBound !== 'boolean') throw Error('Invalid deployment boundary.');
   if (data.transactionHash != null && (typeof data.transactionHash !== 'string' || !/^[a-f0-9]{64}$/.test(data.transactionHash))) throw Error('Invalid deployment transaction.');
   if (status === 'CONFIRMED') {
     if (data.onChainSignerBound !== true || typeof data.address !== 'string' || addressKind(data.address) !== 'contract' ||
@@ -18,12 +19,15 @@ export function parseDeployment(value: unknown): DeploymentView {
     let funding:DeploymentView['funding'];
     if(data.funding!==undefined) {
       const f=object(data.funding);
-      if(!['AVAILABLE','PENDING','SUBMITTED','FUNDED','FAILED'].includes(String(f.status))||f.amountStroops!=='1000000000000')throw Error('Invalid funding status.');
+      if(!['AVAILABLE','PENDING','SUBMITTED','FUNDED','FAILED','REVIEW_REQUIRED'].includes(String(f.status)) ||
+        !(f.amountStroops==='100000000000' || (['FUNDED','REVIEW_REQUIRED'].includes(String(f.status)) && f.amountStroops==='1000000000000')))throw Error('Invalid funding status.');
       if(f.status==='FUNDED' && (typeof f.transactionHash!=='string'||!/^[a-f0-9]{64}$/.test(f.transactionHash)||!Number.isSafeInteger(f.ledger)||Number(f.ledger)<1))throw Error('Unverified funding receipt.');
-      funding={status:String(f.status),transactionHash:typeof f.transactionHash==='string'?f.transactionHash:undefined};
+      funding={status:String(f.status),amountXlm:f.amountStroops==='100000000000'?'10,000':'100,000',transactionHash:typeof f.transactionHash==='string'?f.transactionHash:undefined};
     }
-    return { status, enabled: true, address: data.address, transactionHash: data.transactionHash, ledger: Number(data.confirmedLedger), funding };
+    if(data.spendingEnabled && (typeof data.walletId!=='string'||data.walletId!==data.address))throw Error('Unverified payment wallet.');
+    return { status, enabled: true, spendingEnabled:data.spendingEnabled, walletId:typeof data.walletId==='string'?data.walletId:undefined,
+      address: data.address, transactionHash: data.transactionHash, ledger: Number(data.confirmedLedger), funding };
   }
-  if (status === 'ACTIVE' || data.onChainSignerBound || data.address != null) throw Error('Unverified deployment state.');
+  if (status === 'ACTIVE' || data.onChainSignerBound || data.address != null || data.spendingEnabled) throw Error('Unverified deployment state.');
   return { status, enabled: true, transactionHash: typeof data.transactionHash === 'string' ? data.transactionHash : undefined };
 }

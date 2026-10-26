@@ -4,12 +4,17 @@ import { getConfig } from './config.js';
 import { initializeStore, db } from './store.js';
 import { configuredPayments } from './smart-account/manifest.js';
 import { configuredDeployments } from './smart-account/automatic-deployment.js';
+import { configuredPrimaryPayments } from './smart-account/primary-payments.js';
 import { initializeStoreWithRetry } from './database-startup.js';
 
 type AppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
 const defaults = {
   initialize: initializeStore,
-  payments: async (env: NodeJS.ProcessEnv): Promise<AppOptions> => ({ ...(await configuredPayments(env)), deployments: await configuredDeployments(env), indexer: configuredIndexer(env) }),
+  payments: async (env: NodeJS.ProcessEnv): Promise<AppOptions> => {
+    const deployments=await configuredDeployments(env);
+    const payments=await configuredPrimaryPayments(env,deployments) ?? await configuredPayments(env);
+    return {...payments,deployments,indexer:configuredIndexer(env)};
+  },
   build: buildApp,
   closeStore: () => db.end(),
 };

@@ -90,3 +90,15 @@ describe('independent confirmation and event identity', () => {
     expect(() => verifyOutcome('a'.repeat(64), response)).toThrow('TRANSACTION_HASH_MISMATCH');
   });
 });
+
+it('filters wallet events in both directions and verifies every discovered transaction',async()=>{
+ const server=serverMock(),chain=new StellarChain(server as unknown as rpc.Server,relayer),tx='a'.repeat(64);
+ server.getEvents.mockResolvedValue({events:[{txHash:tx}],cursor:'wallet-page'});
+ const outcome=vi.spyOn(chain,'outcome').mockResolvedValue({status:'SUCCESS',transactionHash:tx,events:[]});
+ expect(await chain.events(undefined,100,wallet.address)).toEqual({events:[],cursor:'wallet-page'});
+ const topic=new Address(wallet.address).toScVal().toXDR('base64'),transfer=xdr.ScVal.scvSymbol('transfer').toXDR('base64');
+ expect(server.getEvents).toHaveBeenCalledWith({startLedger:100,filters:[{type:'contract',contractIds:[NATIVE_SAC],topics:[[transfer,'*',topic],[transfer,'*',topic,'*'],[transfer,topic,'*'],[transfer,topic,'*','*']]}],limit:100});
+ expect(outcome).toHaveBeenCalledWith(tx);outcome.mockResolvedValue({status:'NOT_FOUND'});
+ await expect(chain.events('wallet-page',100,wallet.address)).rejects.toThrow('EVENT_TRANSACTION_UNVERIFIED');
+ expect(server.getEvents).toHaveBeenLastCalledWith(expect.objectContaining({cursor:'wallet-page'}));
+});

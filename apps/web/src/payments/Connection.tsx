@@ -3,19 +3,22 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
 import { parseDeployment, type DeploymentView } from './deployment';
 import type { PaymentAdapter } from './model';
+import { WalletAccountContext } from './account-context';
+import { Link } from 'react-router-dom';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
 /** Only the public account ID is remembered. Session authority stays in memory. */
-export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: PaymentAdapter | null): void; signer?: TransferSigner }) {
+export function PaymentConnection({ onConnect, signer, showSetup = true, showAccountActions = true, children }: { onConnect(adapter: PaymentAdapter | null): void; signer?: TransferSigner; showSetup?: boolean; showAccountActions?: boolean; children?: React.ReactNode }) {
   const token = useRef<string | undefined>(undefined);
   const deadline = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const poll = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const generation = useRef(0);
   const lock = useRef(false);
+  const openedWallet = useRef<string | undefined>(undefined);
   const [accountId, setAccountId] = useState(savedAccountId);
   const [email, setEmail] = useState(savedAccountId);
   const [walletId, setWalletId] = useState('');
@@ -37,15 +40,17 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const active = (id: number) => generation.current === id && !!token.current && Date.now() < deadline.current;
   function clearSession(message = '') {
     generation.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
+    openedWallet.current=undefined;
     setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
   async function openWallet(selected: OwnedWallet, id: number) {
+    if(openedWallet.current===selected.id)return;
     const session = token.current;
     const adapter = await connectPaymentAdapter(apiClient(() => session), selected.id, signer);
     if (!active(id)) return;
     if (adapter.address !== selected.address) throw Error('Wallet identity changed. Reconnect to refresh your wallets.');
-    onConnect(adapter); setCanSign(adapter.canSign !== false); setConnected(true);
+    openedWallet.current=selected.id;onConnect(adapter); setCanSign(adapter.canSign !== false); setConnected(true);
   }
   async function loadDeployment(id: number, reserve = false) {
     clearTimeout(poll.current);
@@ -56,6 +61,14 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       if (!active(id)) return;
       const view = parseDeployment(value);
       setDeployment(view); setDeploymentStatus(view.status);
+      if(view.spendingEnabled && view.walletId && openedWallet.current!==view.walletId) {
+        const owned=await discoverWallets(apiClient(()=>session));
+        if(!active(id))return;
+        setWallets(owned);setWalletId(view.walletId);
+        const selected=owned.find(w=>w.id===view.walletId && w.address===view.address);
+        if(!selected)throw Error('Verified wallet is not available for this account.');
+        await openWallet(selected,id);
+      }
       if (view.enabled && (['PENDING','SUBMITTED'].includes(view.status) || ['PENDING','SUBMITTED'].includes(view.funding?.status ?? ''))) {
         poll.current = setTimeout(() => { void loadDeployment(id); }, 5000);
       }
@@ -89,7 +102,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       throw Error('Invalid authenticated session. Reconnect with your account ID.');
     }
     const previous = token.current;
-    if (previous) { onConnect(null); setConnected(false); }
+    if (previous) { onConnect(null); setConnected(false); openedWallet.current=undefined; }
     clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
@@ -173,7 +186,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function refreshDeployment() {
     if (lock.current || !active(generation.current)) return;
     const id = generation.current; lock.current = true; setBusy(true); setError('');
-    try { await loadDeployment(id, deploymentStatus === 'NOT_STARTED'); }
+    // Requeue idempotently: profiles created while deployment was disabled have
+    // a legacy reservation but no deployment descriptor for the worker to claim.
+    try { await loadDeployment(id, !deployment?.address); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
   async function fundTestnet() {
@@ -202,32 +217,36 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     try { await navigator.clipboard.writeText(accountId); setNotice('Account ID copied. Keep it for sign-in; it cannot replace a passkey.'); }
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
-  return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
-    <h2>{authenticated ? 'Your passkey profile' : 'Connect or create a passkey profile'}</h2>
-    <p>Use your email address and passkey to find your Testnet wallet. Where automatic deployment is enabled, your verified primary passkey is bound to a new C-address. Registration never funds a wallet.</p>
-    {authenticated ? <>
-      <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
-      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
+  return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
+    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
+    {showSetup && <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
+    <h2>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h2>
+    <p>{authenticated ? 'Your account is signed in. Check wallet deployment and funding below before sending or receiving.' : 'Get started with your email and device passkey. New accounts require a verified wallet deployment before payments are available.'}</p>
+    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
+      {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
+      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your email is authenticated. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
         {deployment?.address ? <>
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>
           <label htmlFor="deployed-contract">Deployed C-address</label><input id="deployed-contract" value={deployment.address} readOnly/>
           <p>Deployment ledger: {deployment.ledger}. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.transactionHash}`} target="_blank" rel="noreferrer">View deployment transaction</a></p>
-          <p>Payments remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
-        </> : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
+          <p>{deployment.spendingEnabled ? 'Your wallet is ready to send and receive Testnet XLM. Each send requires your primary passkey.' : 'Payment access is not ready yet. Refresh the deployment status to check again.'}</p>
+        </> : deployment?.enabled === false ? <p role="status">Your passkey is ready. Automatic wallet creation is disabled on this server. The operator must enable it before your C-wallet can be created. Once enabled, select Refresh deployment status to continue with your existing passkey.</p>
+          : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
         <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
       </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       {deployment?.address && <div aria-label="Testnet funding">
-        {deployment.funding?.status === 'FUNDED' ? <p role="status">100,000 Testnet XLM allocated. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.funding.transactionHash}`} target="_blank" rel="noreferrer">View funding transaction</a></p>
-          : deployment.funding?.status === 'PENDING' || deployment.funding?.status === 'SUBMITTED' ? <p role="status">Your 100,000 Testnet XLM allocation is pending confirmation.</p>
+        {deployment.funding?.status === 'FUNDED' ? <p role="status">{deployment.funding.amountXlm} Testnet XLM allocated. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.funding.transactionHash}`} target="_blank" rel="noreferrer">View funding transaction</a></p>
+          : deployment.funding?.status === 'PENDING' || deployment.funding?.status === 'SUBMITTED' ? <p role="status">Your 10,000 Testnet XLM allocation is pending confirmation.</p>
+          : deployment.funding?.status === 'REVIEW_REQUIRED' ? <p role="alert">Funding confirmation needs operator review. Your request will not be repeated automatically.</p>
           : deployment.funding?.status === 'FAILED' ? <p role="alert">The Testnet funding transaction failed. Contact the operator for review.</p>
-          : <><p>Your C-wallet is ready. Request a one-time allocation of 100,000 Testnet XLM. Test tokens have no monetary value.</p>
+          : <><p>Your C-wallet is ready. Request a one-time allocation of 10,000 Testnet XLM. Test tokens have no monetary value.</p>
             <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
-      <p>Add an independent passkey on another device or security key. Off-chain enrollment alone does not add a backup on-chain signer or verify recovery.</p>
-      <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
-      <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
+      <h3>Security and recovery</h3><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p>
+      {showAccountActions && <><button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
+      <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button></>}
     </> : <>
       <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
         <label htmlFor="account-id">Email address (Account ID)</label>
@@ -236,8 +255,10 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       </fieldset></form>
       <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
     </>}
-    {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
+    {showAccountActions && accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert" className="error">{error}</p>}
-  </section>;
+  </section>}
+    {children}
+  </WalletAccountContext.Provider>;
 }

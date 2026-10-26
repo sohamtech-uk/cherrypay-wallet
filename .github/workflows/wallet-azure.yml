@@ -10,6 +10,11 @@ permissions:
   contents: read
 jobs:
   containers:
+    # Only the newest CI run for a given ref needs to finish.
+    # Keep this separate from the non-cancelling Azure deployment lock.
+    concurrency:
+      group: wallet-container-ci-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

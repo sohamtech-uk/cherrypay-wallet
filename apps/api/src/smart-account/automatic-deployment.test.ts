@@ -118,7 +118,9 @@ describe('deployment configuration', () => {
     await expect(configuredDeployments({...env,WALLET_DEPLOYMENT_MAX_FEE_STROOPS:'500000001'})).rejects.toThrow('INVALID_DEPLOYMENT_FEE_CAP');
     await expect(configuredDeployments({...env,WALLET_DEPLOYMENT_PILOT_LIMIT:'-1'})).rejects.toThrow('INVALID_DEPLOYMENT_LIMIT');
     expect(preflight).not.toHaveBeenCalled();
-    expect(await configuredDeployments({...env,STELLAR_RELAYER_SECRET:other.secret()})).toBeInstanceOf(AutomaticDeploymentService);
+    const configured=await configuredDeployments({...env,STELLAR_RELAYER_SECRET:other.secret()});
+    expect(configured).toBeInstanceOf(AutomaticDeploymentService);
+    expect(configured?.funding).toBeDefined();
     expect(preflight).toHaveBeenCalledTimes(1);
   });
   it('does not claim a reservation or primary binding is recovered', () => {

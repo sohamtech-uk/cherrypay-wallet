@@ -95,3 +95,17 @@ it('cancels the persisted preview before editing and only then clears the recove
   await screen.findByRole('button', { name: 'Preview payment' });
   expect(adapter.cancelAttempt).toHaveBeenCalledWith('q'); expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeNull();
 });
+
+it('resets a missing or unsigned payment only after server confirmation and enables a new recipient',async()=>{
+ const adapter=service(),key='safe-reset-saved-key',storageKey=`cherrypay:pending:TESTNET:${address}`;
+ adapter.resetAttempt=vi.fn(async()=>{});localStorage.setItem(storageKey,key);mount(<Send/>,adapter);
+ await userEvent.click(screen.getByRole('button',{name:'Reset and change recipient'}));
+ await screen.findByLabelText('Recipient address');expect(localStorage.getItem(storageKey)).toBeNull();expect(adapter.resetAttempt).toHaveBeenCalledWith(key);
+ expect(screen.getByLabelText('Recipient address')).toHaveProperty('value','');expect(adapter.createAttempt).not.toHaveBeenCalled();expect(adapter.approve).not.toHaveBeenCalled();
+});
+it('keeps the recovery key if a submitted payment or unavailable server prevents reset',async()=>{
+ const adapter=service(),key='unresolved-saved-key',storageKey=`cherrypay:pending:TESTNET:${address}`;
+ adapter.resetAttempt=vi.fn(async()=>{throw Error('Payment may already be submitted.');});localStorage.setItem(storageKey,key);mount(<Send/>,adapter);
+ await userEvent.click(screen.getByRole('button',{name:'Reset and change recipient'}));await screen.findByText('Payment may already be submitted.');
+ expect(localStorage.getItem(storageKey)).toBe(key);expect(screen.queryByLabelText('Recipient address')).toBeNull();expect(adapter.createAttempt).not.toHaveBeenCalled();
+});

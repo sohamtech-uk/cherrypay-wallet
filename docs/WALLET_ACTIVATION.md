@@ -51,4 +51,4 @@ flowchart TD
 
 Sources: [Wallet Backend authentication](https://github.com/stellar/wallet-backend/blob/main/docs/api/authentication.md), [Wallet Backend deployment guide](https://github.com/stellar/wallet-backend/blob/main/docs/deploy/README.md). Follow documentation at the exact source commit used in the deployment.
 
-Email-first sign-in and the optional 100,000 XLM Testnet funding prompt are described in [email wallet onboarding](EMAIL_WALLET_ONBOARDING.md).
+Email-first sign-in and the optional 10,000 XLM Testnet funding prompt are described in [email wallet onboarding](EMAIL_WALLET_ONBOARDING.md).

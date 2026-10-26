@@ -1,14 +1,14 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import type { PaymentRepository } from './repository.js';
-import { digest, PaymentError, requireThat, TERMINAL, validateIntent, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
+import { digest, PaymentError, requireThat, spendingReady, TERMINAL, validateIntent, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
 
 export class PaymentService {
-  constructor(readonly store: PaymentRepository, readonly chain: Chain, readonly policies: PolicyReader, readonly startLedger: number) {
+  constructor(readonly store: PaymentRepository, readonly chain: Chain, readonly policies: PolicyReader, readonly startLedger: number, readonly syncWallets?:()=>Promise<void>, readonly monitorWallets?:()=>Promise<void>) {
     requireThat(Number.isSafeInteger(startLedger) && startLedger > 0, 'START_LEDGER_REQUIRED');
   }
   private async policy(wallet: Wallet, fingerprint = wallet.policy) {
     const current = await this.policies.current(wallet.address);
-    requireThat(current.recoveryReady && current.fingerprint === fingerprint, 'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
+    requireThat(spendingReady(current) && current.fingerprint === fingerprint, 'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
   }
   private async recipient(wallet: Wallet, intent: Intent) {
     if (!StrKey.isValidContract(intent.destination)) return;
@@ -16,7 +16,7 @@ export class PaymentService {
     const recipient = (await this.store.allWallets()).find(w => w.address === intent.destination);
     requireThat(recipient && recipient.id !== wallet.id && recipient.routes.includes('contract'), 'UNVERIFIED_CONTRACT_RECIPIENT', 400);
     const current = await this.policies.current(recipient.address);
-    requireThat(current.recoveryReady && current.fingerprint === recipient.policy, 'RECIPIENT_RECOVERY_OR_POLICY_UNREADY');
+    requireThat(spendingReady(current) && current.fingerprint === recipient.policy, 'RECIPIENT_RECOVERY_OR_POLICY_UNREADY');
   }
   async get(owner: string, walletId: string, id: string) {
     await this.store.wallet(walletId, owner); const a = await this.store.get(id);
@@ -81,6 +81,17 @@ export class PaymentService {
     const { attempt: a, token } = await this.store.claim(id, ['preparing', 'awaiting_approval', 'authorizing']);
     a.status = 'rejected'; a.failureCode = 'USER_CANCELLED'; await this.store.finish(a, token); return a;
   }
+  async reset(owner:string,walletId:string,key:string) {
+    const wallet=await this.store.wallet(walletId,owner);
+    const prior=await this.store.findOrBlockMissing(wallet,key);
+    if(!prior)return {reset:true as const,outcome:'not_created' as const};
+    if(TERMINAL.includes(prior.status)) {
+      requireThat(prior.status!=='confirmed'||prior.verified,'TRANSFER_NOT_INDEPENDENTLY_VERIFIED');
+      return {reset:true as const,outcome:prior.status,attempt:prior};
+    }
+    const cancelled=await this.cancel(owner,walletId,prior.id);
+    return {reset:true as const,outcome:'cancelled' as const,attempt:cancelled};
+  }
   async reconcile(id: string) {
     const existing = await this.store.get(id); if (TERMINAL.includes(existing.status)) return existing;
     const { attempt: a, token } = await this.store.claim(id, ['ready', 'pending', 'unknown']);
@@ -124,6 +135,8 @@ export class PaymentService {
         }
       } catch { /* Concurrent worker or unavailable dependency: retain durable state. */ }
     }
+    await this.syncWallets?.();
+    if(this.monitorWallets){await this.monitorWallets();return;}
     const cursor = await this.store.cursor();
     const page = await this.chain.events(cursor, this.startLedger);
     await this.store.ingest(page.events, cursor, page.cursor);

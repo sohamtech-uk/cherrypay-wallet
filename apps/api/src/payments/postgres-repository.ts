@@ -76,7 +76,7 @@ async function insertEvents(client:PoolClient,events:TransferEvent[]) {
 
 /** PostgreSQL application persistence. Never query Wallet Backend's vendor-owned database. */
 export class PostgresPaymentRepository implements PaymentRepository {
-  constructor(readonly pool:Pool = db) {}
+  constructor(readonly pool:Pool = db, readonly monitorId:string = MONITOR) {}
   async wallet(id:string,owner:string):Promise<Wallet> {
     const {rows}=await this.pool.query('SELECT * FROM wallet_onchain_accounts WHERE id=$1 AND owner=$2 AND network=$3',[id,owner,'TESTNET']);
     requireThat(rows.length===1,'WALLET_NOT_FOUND',404);
@@ -99,9 +99,23 @@ export class PostgresPaymentRepository implements PaymentRepository {
     const {rows}=await this.pool.query('SELECT * FROM wallet_payment_attempts WHERE wallet_id=$1 AND idempotency_key=$2',[walletId,key]);
     return rows[0]?attemptOf(rows[0]):undefined;
   }
+  async findOrBlockMissing(wallet:Wallet,key:string):Promise<Attempt|undefined> {
+    requireThat(/^[A-Za-z0-9_-]{16,128}$/.test(key),'INVALID_IDEMPOTENCY_KEY',400);
+    return transaction(this.pool,async client=>{
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([wallet.id,key])]);
+      const owned=await client.query("SELECT id FROM wallet_onchain_accounts WHERE id=$1 AND owner=$2 AND network='TESTNET'",[wallet.id,wallet.owner]);
+      requireThat(owned.rowCount===1,'WALLET_NOT_FOUND',404);
+      const prior=await client.query('SELECT * FROM wallet_payment_attempts WHERE wallet_id=$1 AND idempotency_key=$2',[wallet.id,key]);
+      if(prior.rows[0])return attemptOf(prior.rows[0]);
+      await client.query('INSERT INTO wallet_cancelled_preparations(wallet_id,idempotency_key) VALUES($1,$2) ON CONFLICT DO NOTHING',[wallet.id,key]);
+    });
+  }
   async create(wallet:Wallet,intent:Intent,key:string):Promise<Attempt> {
     requireThat(/^[A-Za-z0-9_-]{16,128}$/.test(key),'INVALID_IDEMPOTENCY_KEY',400);
     return transaction(this.pool,async client=>{
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([wallet.id,key])]);
+      const cancelled=await client.query('SELECT 1 FROM wallet_cancelled_preparations WHERE wallet_id=$1 AND idempotency_key=$2',[wallet.id,key]);
+      requireThat(cancelled.rowCount===0,'PAYMENT_PREPARATION_RESET',409);
       await client.query('INSERT INTO wallet_relayer_locks(id) VALUES($1) ON CONFLICT(id) DO NOTHING',[RELAYER]);
       const {rows:locked}=await client.query('SELECT attempt_id FROM wallet_relayer_locks WHERE id=$1 FOR UPDATE',[RELAYER]);
       const {rows:prior}=await client.query('SELECT * FROM wallet_payment_attempts WHERE wallet_id=$1 AND idempotency_key=$2',[wallet.id,key]);
@@ -160,17 +174,17 @@ export class PostgresPaymentRepository implements PaymentRepository {
     return rows.map(attemptOf);
   }
   async cursor():Promise<string|undefined> {
-    const {rows}=await this.pool.query('SELECT cursor FROM wallet_monitor_cursors WHERE id=$1',[MONITOR]);
+    const {rows}=await this.pool.query('SELECT cursor FROM wallet_monitor_cursors WHERE id=$1',[this.monitorId]);
     return rows[0]?.cursor??undefined;
   }
   async ingest(events:TransferEvent[],expected:string|undefined,next:string):Promise<void> {
     requireThat(typeof next==='string' && next.length>0 && next.length<=1024,'INVALID_EVENT_CURSOR');
     await transaction(this.pool,async client=>{
-      await client.query('INSERT INTO wallet_monitor_cursors(id) VALUES($1) ON CONFLICT(id) DO NOTHING',[MONITOR]);
-      const {rows}=await client.query('SELECT cursor FROM wallet_monitor_cursors WHERE id=$1 FOR UPDATE',[MONITOR]);
+      await client.query('INSERT INTO wallet_monitor_cursors(id) VALUES($1) ON CONFLICT(id) DO NOTHING',[this.monitorId]);
+      const {rows}=await client.query('SELECT cursor FROM wallet_monitor_cursors WHERE id=$1 FOR UPDATE',[this.monitorId]);
       requireThat((rows[0]?.cursor??undefined)===expected,'CURSOR_CHANGED');
       await insertEvents(client,events);
-      await client.query('UPDATE wallet_monitor_cursors SET cursor=$2,updated_at=NOW() WHERE id=$1',[MONITOR,next]);
+      await client.query('UPDATE wallet_monitor_cursors SET cursor=$2,updated_at=NOW() WHERE id=$1',[this.monitorId,next]);
     });
   }
   async history(address:string,before?:string):Promise<{event:TransferEvent;cursor:string}[]> {

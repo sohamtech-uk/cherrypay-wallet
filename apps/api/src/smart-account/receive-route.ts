@@ -2,7 +2,7 @@ import { Address, xdr, type rpc } from '@stellar/stellar-sdk';
 import { TESTNET_PASSPHRASE } from '../config.js';
 import { hashWasm } from './deployment-evidence.js';
 import { rejectLegacyAccountWasm } from './kit-manifest.js';
-import { requireThat, type PolicyReader } from '../payments/model.js';
+import { requireThat, spendingReady, type PolicyReader } from '../payments/model.js';
 import type { PaymentRepository } from '../payments/repository.js';
 
 /** Verify BOTH instance and executable code using ledger keys, not an address claim.
@@ -40,7 +40,7 @@ export function verifiedReceiveRoutes(store:PaymentRepository, policies:PolicyRe
     await verifyCurrentContractCode(server,wallet.address,deployment.accountWasmHash);
     await verifyCurrentContractCode(server,deployment.verifierAddress,deployment.verifierWasmHash);
     const policy=await policies.current(wallet.address);
-    requireThat(policy.recoveryReady && policy.fingerprint===wallet.policy,'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
+    requireThat(spendingReady(policy) && policy.fingerprint===wallet.policy,'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
     return {address:wallet.address,route:'contract' as const,instructions:'Receive Testnet native XLM using a Stellar Asset Contract transfer to this verified smart-wallet address. Classic payment operations and exchange withdrawals are not supported.'};
   };
 }

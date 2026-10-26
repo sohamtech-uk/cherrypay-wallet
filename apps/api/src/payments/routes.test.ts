@@ -80,3 +80,27 @@ it('only queries the indexer after session ownership checks and never labels its
   expect(indexer.account).toHaveBeenCalledTimes(1);
   expect(indexer.account).toHaveBeenCalledWith(wallet.address);
 });
+
+it('activates only the authenticated owner and refreshes balance from the chain',async()=>{
+  const chain=mockChain(),ensureOwnerWallet=vi.fn(async()=>{}),server=Fastify({ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
+  const service=new PaymentService(store,chain,mockPolicy(),1);
+  await registerPaymentRoutes(server,{service,origin:headers.origin,authenticate:async()=>({subject:wallet.owner}),ensureOwnerWallet});
+  await store.setBalance(wallet.address,'0',90);
+  vi.mocked(chain.balance).mockResolvedValue({amountStroops:'100000000000',ledger:101});
+  try {
+    expect((await server.inject({url:'/api/v1/wallets?owner=bob'})).statusCode).toBe(400);
+    expect(ensureOwnerWallet).not.toHaveBeenCalled();
+    expect((await server.inject({url:'/api/v1/wallets'})).statusCode).toBe(200);
+    expect(ensureOwnerWallet).toHaveBeenCalledWith(wallet.owner);
+    expect((await server.inject({url:'/api/v1/wallets/wallet-1/balance'})).json()).toMatchObject({snapshot:{amountStroops:'100000000000',ledger:101}});
+    expect(chain.balance).toHaveBeenCalledWith(wallet.address);
+  } finally {await server.close();}
+});
+it('requires the authenticated owner and trusted origin for a durable reset',async()=>{
+ const server=await app(),key='route-reset-missing-key',url='/api/v1/wallets/wallet-1/attempt-by-key/'+key+'/reset';
+ try{
+   expect((await server.inject({method:'POST',url,headers:{origin:'https://evil.example'},payload:{}})).statusCode).toBe(403);
+   expect((await server.inject({method:'POST',url,headers,payload:{}})).json()).toEqual({network:'TESTNET',walletId:'wallet-1',key,reset:true,outcome:'not_created'});
+   expect((await server.inject({method:'POST',url:path,headers:{...headers,'idempotency-key':key},payload:intent})).statusCode).toBe(409);
+ }finally{await server.close();}
+});

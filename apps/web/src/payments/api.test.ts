@@ -117,3 +117,20 @@ it('validates payroll wallet, line binding, exact totals and confirmed status', 
   }
   expect(signer).not.toHaveBeenCalled();
 });
+
+it('accepts reset only for the exact saved wallet key and a terminal or absent attempt',async()=>{
+ const {api}=fixture(),adapter=await connectPaymentAdapter(api,wallet.id),key='confirmed-reset-key';
+ const result={network:'TESTNET',walletId:wallet.id,key,reset:true,outcome:'not_created'};
+ api.mockResolvedValue(result);await expect(adapter.resetAttempt!(key)).resolves.toBeUndefined();
+ expect(api).toHaveBeenCalledWith('wallets/wallet-1/attempt-by-key/'+key+'/reset',{});
+ for(const patch of [{key:'different-reset-key'},{walletId:'other'},{network:'PUBLIC'},{reset:false},{outcome:'cancelled',attempt:attempt({status:'unknown',transactionHash:'a'.repeat(64)})},{outcome:'confirmed',attempt:attempt({status:'confirmed',verified:false,transactionHash:'a'.repeat(64)})}]){
+   api.mockResolvedValue({...result,...patch});await expect(adapter.resetAttempt!(key)).rejects.toThrow();
+ }
+ api.mockResolvedValue({...result,outcome:'cancelled',attempt:attempt({status:'rejected'})});await expect(adapter.resetAttempt!(key)).resolves.toBeUndefined();
+});
+it('does not treat reset network failure or HTTP not-found as permission to discard recovery',async()=>{
+ const {api}=fixture(),adapter=await connectPaymentAdapter(api,wallet.id);
+ for(const error of [new ApiError(404,'ATTEMPT_NOT_FOUND'),new ApiError(409,'CANNOT_CANCEL_SUBMITTED_ATTEMPT'),Error('timeout')]){
+  api.mockRejectedValue(error);await expect(adapter.resetAttempt!('unresolved-reset-key')).rejects.toThrow('Reset could not be confirmed');
+ }
+});

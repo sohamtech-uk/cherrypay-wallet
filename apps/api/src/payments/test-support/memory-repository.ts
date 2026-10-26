@@ -9,6 +9,7 @@ export class MemoryRepository implements PaymentRepository {
   events = new Map<string, TransferEvent>();
   balances = new Map<string, BalanceSnapshot>();
   currentCursor?: string;
+  cancelledKeys=new Set<string>();
   register(wallet: Wallet) { this.wallets.set(wallet.id, copy(wallet)); }
   async wallet(id: string, owner: string) { const wallet = this.wallets.get(id); requireThat(wallet && wallet.owner === owner, 'WALLET_NOT_FOUND', 404); return copy(wallet); }
   async allWallets() { return [...this.wallets.values()].map(copy); }
@@ -16,9 +17,16 @@ export class MemoryRepository implements PaymentRepository {
   private read(id: string) { const a = this.attempts.get(id); requireThat(a, 'ATTEMPT_NOT_FOUND', 404); return copy(a); }
   async get(id: string) { return this.read(id); }
   async byKey(id: string, key: string) { return copy([...this.attempts.values()].find(a => a.walletId === id && a.idempotencyKey === key)); }
+  async findOrBlockMissing(wallet:Wallet,key:string){
+    requireThat(/^[A-Za-z0-9_-]{16,128}$/.test(key),'INVALID_IDEMPOTENCY_KEY',400);
+    const owned=this.wallets.get(wallet.id);requireThat(owned?.owner===wallet.owner,'WALLET_NOT_FOUND',404);
+    const prior=[...this.attempts.values()].find(a=>a.walletId===wallet.id&&a.idempotencyKey===key);
+    if(prior)return copy(prior);this.cancelledKeys.add(JSON.stringify([wallet.id,key]));
+  }
   async create(wallet: Wallet, intent: Intent, key: string) {
     // No await inside this fake's atomic block. Real PostgreSQL MUST use transactions/row locks.
     requireThat(/^[a-zA-Z0-9_-]{16,128}$/.test(key), 'INVALID_IDEMPOTENCY_KEY', 400);
+    requireThat(!this.cancelledKeys.has(JSON.stringify([wallet.id,key])),'PAYMENT_PREPARATION_RESET',409);
     const prior = [...this.attempts.values()].find(a => a.walletId === wallet.id && a.idempotencyKey === key);
     if (prior) { requireThat(prior.requestDigest === digest(intent), 'IDEMPOTENCY_CONFLICT'); return copy(prior); }
     requireThat(![...this.attempts.values()].some(a => !TERMINAL.includes(a.status)), 'RELAYER_BUSY_RESOLVE_EXISTING_ATTEMPT');
