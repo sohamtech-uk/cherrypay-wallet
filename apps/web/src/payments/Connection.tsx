@@ -175,7 +175,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   async function refreshDeployment() {
     if (lock.current || !active(generation.current)) return;
     const id = generation.current; lock.current = true; setBusy(true); setError('');
-    try { await loadDeployment(id, deploymentStatus === 'NOT_STARTED'); }
+    // Requeue idempotently: profiles created while deployment was disabled have
+    // a legacy reservation but no deployment descriptor for the worker to claim.
+    try { await loadDeployment(id, !deployment?.address); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
   async function fundTestnet() {
@@ -216,7 +218,8 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
           <label htmlFor="deployed-contract">Deployed C-address</label><input id="deployed-contract" value={deployment.address} readOnly/>
           <p>Deployment ledger: {deployment.ledger}. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.transactionHash}`} target="_blank" rel="noreferrer">View deployment transaction</a></p>
           <p>Payments remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
-        </> : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
+        </> : deployment?.enabled === false ? <p role="status">Your passkey is ready. Automatic wallet creation is disabled on this server. The operator must enable it before your C-wallet can be created. Once enabled, select Refresh deployment status to continue with your existing passkey.</p>
+          : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
         <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
       </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
       {deployment?.address && <div aria-label="Testnet funding">
