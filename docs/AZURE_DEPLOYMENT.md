@@ -58,9 +58,11 @@ Configure the `azure-wallet-testnet` GitHub environment with:
 | Secret | `WALLET_DATABASE_URL` | Alternative connection URL when not using Key Vault; configure only one source |
 | Secret | `AURORA_INTENTS_API_KEY` | Optional Studio Swap API key, API container only; preserve the same key on later releases |
 
-Scope OIDC federation to `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet`, and restrict that environment's deployment branches to `develop`. Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
+Scope OIDC federation to `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet`, and restrict the `azure-wallet-testnet` GitHub environment's deployment branches to **`main`** (not `develop`). Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
 
-The `Wallet Azure production images` workflow builds and smoke-tests both production images on pull requests and develop pushes. The deployment job runs only on manual dispatch for `develop`, after its container checks pass. GitHub requires the workflow file on the repository's default branch before exposing `workflow_dispatch`; until that is arranged, an authorized operator can run the same `bash infra/azure/deploy.sh` from a clean, checked-out develop commit in Azure Cloud Shell or an authenticated CLI. Set the configuration above in the environment through your secret manager. The script requires Azure CLI (with Container Apps and Bicep support), Node 24, Git and curl. Do not enable `set -x`.
+The `Wallet Azure production images` workflow validates and smoke-tests production images on pull requests and on pushes to `develop` or `main`. **It automatically deploys to the `azure-wallet-testnet` environment after successful container checks only for pushes to `main`** that match the workflow's path filter (`apps/**`, `infra/azure/**`, `scripts/test-production-containers.sh`, or `.github/workflows/wallet-azure.yml`). An authorized operator can also use **Run workflow → Branch: `main`**, which runs the same checks before deployment. PR events, pushes to `develop` and manual dispatch from `develop` never deploy. A docs-only merge that does not match the path filter does not deploy automatically; select manual dispatch on `main` if a new rollout is required. Set the environment variables and secrets above before release. The script requires Azure CLI (with Container Apps and Bicep support), Node 24, Git and curl. Do not enable `set -x`.
+
+Before promoting this change, update **Settings → Environments → azure-wallet-testnet → Deployment branches and tags** to allow `main` and review any required reviewers. A workflow cannot override an environment's branch rules, so leaving a `develop`-only restriction will block a `main` deployment even with the fixed workflow. The environment's OIDC subject is unchanged. The deployment uses the bootstrap template with payments disabled; **it refuses to overwrite a runtime with payments or Aurora explicitly activated**. Preserve that safety boundary and use the separately reviewed payment-enabled release process for an activated wallet.
 
 The script builds API/web images with ACR, resolves their SHA256 digests, sends the database URL as a secure ARM parameter in a temporary mode-0600 file, and deletes the file on exit. It preserves custom-domain certificate bindings on updates and refuses an existing app without the wallet/Testnet tags. Deployment does not become successful until the generated Azure hostname's readiness endpoint confirms Testnet. No live wallet payment or physical passkey ceremony is implied by a successful infrastructure deployment.
 
@@ -104,8 +106,9 @@ Verify the hostname is secured in Azure, HTTP redirects to HTTPS, `/api/v1/netwo
 Email identity upgrades use the additive `004_email_identity.sql` migration.
 Migrations 001–003 retain the original deployed checksums. The upgrade converts
 UUID ownership columns to text without changing existing IDs, passkey user handles,
-sessions, payment attempts or approval ownership. Original profiles can still sign
-in using **Use a legacy account ID**; newly created profiles use email IDs.
+sessions, payment attempts or approval ownership. The current consumer UI accepts email account IDs; backend compatibility for
+original UUID identities is separate from this email-first experience. Newly
+created profiles use email IDs.
 Never clear the database or rewrite stored checksums to resolve a migration error.
 The PostgreSQL upgrade regression test seeds the previous schema and checks restart,
 ownership constraints and pending-payment preservation before deployment.
