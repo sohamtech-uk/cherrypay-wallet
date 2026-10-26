@@ -216,9 +216,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
   return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
-    <h2>{authenticated ? 'Your passkey profile' : 'Connect or create a passkey profile'}</h2>
-    <p>Use your email address and passkey to find your Testnet wallet. Where automatic deployment is enabled, your verified primary passkey is bound to a new C-address. Registration never funds a wallet.</p>
-    {authenticated ? <>
+    <h2>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h2>
+    <p>{authenticated ? 'Your account is signed in. Check wallet deployment and funding below before sending or receiving.' : 'Get started with your email and device passkey. New accounts require a verified wallet deployment before payments are available.'}</p>
+    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
       <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
@@ -240,9 +240,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
             <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
-      <p>Add an independent passkey on another device or security key. Off-chain enrollment alone does not add a backup on-chain signer or verify recovery.</p>
+      <h3>Security and recovery</h3><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p>
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
-      <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
+      <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button>
     </> : <>
       <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
         <label htmlFor="account-id">Email address (Account ID)</label>
