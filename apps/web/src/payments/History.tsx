@@ -21,11 +21,32 @@ export function History() {
     request.then(result => { if (!active) return; if (result.items.some(item => item.network !== NETWORK || item.from !== adapter.address && item.destination !== adapter.address)) throw new Error('History does not match this Testnet wallet.'); setItems(result.items); setCursor(result.nextCursor); }).catch(() => { if (active) setError('Unable to load transaction records. Check your connection and retry.'); }).finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, [adapter, attemptId, refresh, page, indexed]);
+  useEffect(() => {
+    if (!adapter || adapter.network !== NETWORK || !attemptId) return;
+    const current = items[0];
+    if (!current || !['submitted','pending','unknown'].includes(current.status)) return;
+    let active = true, inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const item = await adapter.getAttempt(attemptId);
+        if (!active) return;
+        if (item.network !== NETWORK || item.from !== adapter.address && item.destination !== adapter.address) throw new Error('History does not match this Testnet wallet.');
+        setItems([item]); setError('');
+      } catch {
+        // Preserve the last known state; a later interval or manual refresh retries.
+      } finally { inFlight = false; }
+    };
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [adapter, attemptId, items[0]?.status]);
   return <section className="card payment-screen"><span className="eyebrow">STELLAR TESTNET</span><h1>{attemptId ? 'Transaction detail' : 'Transaction history'}</h1>
     {!adapter || adapter.network !== NETWORK ? <><h2>History service not connected</h2><p>Verified activity will appear once the persistent wallet index is connected. No sample transactions are shown.</p><Link className="secondary-button" to="/onboarding">Return to wallet setup</Link></> : <>
       {!attemptId && adapter.listTransfers && <div className="actions"><button aria-pressed={!indexed} onClick={() => { setIndexed(false); setPage(undefined); }}>Payment attempts</button><button aria-pressed={indexed} onClick={() => { setIndexed(true); setPage(undefined); }}>Verified transfers</button></div>}
       {busy && <p role="status">Loading transaction records…</p>}
       {error && <p role="alert" className="error">{error}</p>}
+      {attemptId && items[0] && ['submitted','pending','unknown'].includes(items[0].status) && <p role="status">Status refreshes automatically every 5 seconds until the transaction is confirmed or fails.</p>}
       <button className="secondary-button" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{error ? 'Retry loading' : 'Refresh status'}</button>
       {!busy && !error && !items.length && <p>No transactions yet. Received and sent XLM will appear after indexing.</p>}
       <ul className="transaction-list">{items.map(item => <li key={item.id}><article><h2>{item.from === adapter.address ? 'Sent' : 'Received'} {xlm(item.amountStroops)} XLM</h2><p role="status">{statusLabel(item)}</p><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString()}</time>
