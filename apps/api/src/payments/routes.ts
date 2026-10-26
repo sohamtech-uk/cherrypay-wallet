@@ -26,6 +26,7 @@ export const paymentSchemas = {
 };
 export type PaymentDependencies = {
   service: PaymentService;
+  ensureOwnerWallet?(owner:string):Promise<void>;
   indexer?: Pick<WalletBackendClient, 'account'>;
   // B1/B2 session integration. Never derive identity from body/accountID or an unverified header.
   authenticate(request: FastifyRequest): Promise<{ subject: string; sessionHash?: string } | null>;
@@ -58,6 +59,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
       return { service: dependencies.service, owner, wallet, id: params.attemptId! };
     };
     scope.get('/api/v1/wallets', { schema: { querystring: {type:'object',additionalProperties:false} } }, async request => {
+      await dependencies!.ensureOwnerWallet?.(principals.get(request)!.subject);
       const wallets=await dependencies!.service.store.walletsForOwner(principals.get(request)!.subject);
       requireThat(wallets.length<=100,'WALLET_DISCOVERY_LIMIT');
       return {network:'TESTNET',items:wallets.map(wallet=>({id:wallet.id,address:wallet.address,network:'TESTNET'}))};
@@ -120,7 +122,10 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
       return {network:'TESTNET',source:'wallet-backend',verified:false,observedAt:new Date().toISOString(),account};
     });
     scope.get('/api/v1/wallets/:walletId/balance', { schema: { params: paymentSchemas.wallet } }, async request => {
-      const { service, wallet } = await context(request); return { network: 'TESTNET', address: wallet.address, snapshot: await service.store.balance(wallet.address) };
+      const { service, wallet } = await context(request);
+      const balance=await service.chain.balance(wallet.address);
+      await service.store.setBalance(wallet.address,balance.amountStroops,balance.ledger);
+      return { network: 'TESTNET', address: wallet.address, snapshot: await service.store.balance(wallet.address) };
     });
     scope.get('/api/v1/wallets/:walletId/history', { schema: { params: paymentSchemas.wallet, querystring: paymentSchemas.page } }, async request => {
       const { service, wallet } = await context(request); const page = await service.store.history(wallet.address, (request.query as { cursor?: string }).cursor);

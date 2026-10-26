@@ -6,6 +6,7 @@ on:
       - 'compose.yaml'
       - 'compose.payments.yaml'
       - 'compose.activation.yaml'
+      - 'compose.primary-payments.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
   push:
@@ -15,6 +16,7 @@ on:
       - 'compose.yaml'
       - 'compose.payments.yaml'
       - 'compose.activation.yaml'
+      - 'compose.primary-payments.yaml'
       - 'docs/payments.openapi.json'
       - '.github/workflows/payment-api.yml'
 permissions:
@@ -61,6 +63,14 @@ jobs:
       - name: Validate activation Compose override
         working-directory: .
         run: docker compose --env-file /dev/null -f compose.yaml -f compose.activation.yaml config --quiet
+      - name: Validate primary payments Compose override
+        working-directory: .
+        env:
+          STELLAR_DEPLOYER_PUBLIC_KEY: public-test-placeholder
+          STELLAR_DEPLOYER_SECRET: test-placeholder
+          STELLAR_RELAYER_PUBLIC_KEY: other-public-test-placeholder
+          STELLAR_RELAYER_SECRET: other-test-placeholder
+        run: docker compose --env-file /dev/null -f compose.yaml -f compose.primary-payments.yaml config --quiet
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test

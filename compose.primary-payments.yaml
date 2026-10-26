@@ -1,0 +1,14 @@
+# Explicit Testnet primary-passkey mode; do not combine with compose.payments.yaml.
+services:
+  api:
+    command: ["npm", "start"]
+    environment:
+      WALLET_PRIMARY_PAYMENTS_ENABLED: "true"
+      WALLET_PAYMENTS_ENABLED: "false"
+      WALLET_DEPLOYMENTS_ENABLED: "true"
+      WALLET_TESTNET_FUNDING_ENABLED: ${WALLET_TESTNET_FUNDING_ENABLED:-true}
+      STELLAR_DEPLOYER_PUBLIC_KEY: ${STELLAR_DEPLOYER_PUBLIC_KEY:?Set the deployer public key}
+      STELLAR_DEPLOYER_SECRET: ${STELLAR_DEPLOYER_SECRET:?Inject the deployment sponsor secret}
+      STELLAR_RELAYER_PUBLIC_KEY: ${STELLAR_RELAYER_PUBLIC_KEY:?Set the separate payment sponsor public key}
+      STELLAR_RELAYER_SECRET: ${STELLAR_RELAYER_SECRET:?Inject the payment sponsor secret}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}

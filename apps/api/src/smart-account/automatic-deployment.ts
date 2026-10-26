@@ -24,9 +24,17 @@ export function publicDeployment(j?: DeploymentJob) {
   };
 }
 export class AutomaticDeploymentService {
+  paymentAccess?: (owner:string)=>Promise<{spendingEnabled:boolean;walletId?:string}>;
   constructor(readonly store: DeploymentStore, readonly chain: DeploymentChain, readonly funding?: FriendbotFundingService) {}
   async queue(owner: string) { await this.store.queue(owner); return this.status(owner); }
-  async status(owner: string) { return {...publicDeployment(await this.store.get(owner)), ...(this.funding ? {funding:await this.funding.status(owner)} : {})}; }
+  async status(owner: string) {
+    const view=publicDeployment(await this.store.get(owner));
+    let access:{spendingEnabled:boolean;walletId?:string}={spendingEnabled:false};
+    if(view.onChainSignerBound && this.paymentAccess) {
+      try { access=await this.paymentAccess(owner); } catch { /* Keep verified deployment visible while payment policy is unavailable. */ }
+    }
+    return {...view,...access,...(access.spendingEnabled?{nextAction:'SEND_OR_RECEIVE_TESTNET_XLM'}:{}),...(this.funding?{funding:await this.funding.status(owner)}:{})};
+  }
   async tick(): Promise<void> {
     let current = await this.store.claim();
     if (!current) return;

@@ -49,8 +49,12 @@ export interface Chain {
   events(cursor: string | undefined, startLedger: number): Promise<{ events: TransferEvent[]; cursor: string }>;
 }
 export interface PolicyReader {
-  // B1/B2 adapter must read and hash the current on-chain signer/recovery policy.
-  current(address: string): Promise<{ fingerprint: string; recoveryReady: boolean }>;
+  // Only a trusted adapter may establish spending readiness from current on-chain rules.
+  // Recovery is a separate claim; legacy two-rule adapters retain their existing default.
+  current(address: string): Promise<{ fingerprint: string; recoveryReady: boolean; spendingReady?: boolean }>;
+}
+export function spendingReady(policy: { recoveryReady: boolean; spendingReady?: boolean }) {
+  return policy.spendingReady ?? policy.recoveryReady;
 }
 export function publicAttempt(a: Attempt) {
   return { id: a.id, walletId: a.walletId, from: a.from, ...a.intent,
