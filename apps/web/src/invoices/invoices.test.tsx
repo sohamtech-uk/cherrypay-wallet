@@ -60,6 +60,7 @@ describe('merchant invoices',()=>{
     const create=vi.fn(async input=>({...detail,...input}));
     service.invoices={create,get:vi.fn(async()=>detail),list:vi.fn(async()=>({items:[]})),unmatched:vi.fn(async()=>({items:[]})),allocate:vi.fn()};
     mount(<Invoices/>,service);const user=userEvent.setup();
+    await user.click(screen.getByRole('button',{name:'New invoice'}));
     await user.type(screen.getByLabelText('Merchant name'),'Test Merchant');await user.type(screen.getByLabelText('Invoice reference'),'INV-125');await user.type(screen.getByLabelText('Invoice amount (Testnet XLM)'),'1');
     await user.click(screen.getByRole('button',{name:'Create invoice QR'}));
     expect((await screen.findByTestId('qr-value')).textContent).toBe(window.location.origin+'/pay/'+request.id);
@@ -72,6 +73,7 @@ describe('merchant invoices',()=>{
     service.invoices={create:vi.fn(),get:vi.fn(async()=>detail),list:vi.fn(async()=>({items:[detail]})),unmatched:vi.fn(async()=>({items:[{eventId,transactionHash:hash,from:destination,amountStroops:'10000000',ledger:1,closedAt:Date.now()}]})),allocate:vi.fn(async()=>({...detail,paidStroops:'10000000',remainingStroops:'0',status:'paid' as const}))};
     mount(<Invoices/>,service);const user=userEvent.setup();
     await user.click(await screen.findByRole('button',{name:/INV-125 ·/}));
+    await user.click(screen.getByText('Assign an unmatched receipt'));
     expect(await screen.findByRole('button',{name:'Assign receipt to invoice'})).toHaveProperty('disabled',true);
     await user.selectOptions(screen.getByLabelText('Verified incoming receipt'),eventId);await user.type(screen.getByLabelText('Evidence / reconciliation note'),'Customer supplied matching invoice reference');await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button',{name:'Assign receipt to invoice'}));

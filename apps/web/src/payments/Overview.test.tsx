@@ -9,7 +9,7 @@ import { PaymentContext } from './context';
 import type { Attempt, PaymentAdapter } from './model';
 const address=StrKey.encodeContract(Buffer.alloc(32,1)),other=StrKey.encodeContract(Buffer.alloc(32,2));
 const transfer:Attempt={id:'event-1',network:'TESTNET',from:other,destination:address,amountStroops:'10000001',feeStroops:'0',feeKnown:false,createdAt:'2026-10-25T12:00:00.000Z',status:'confirmed',verified:true,transactionHash:'a'.repeat(64)};
-function service():PaymentAdapter {return {network:'TESTNET',address,supportedDestinations:['classic'],prepare:vi.fn(),createAttempt:vi.fn(),approve:vi.fn(),getAttempt:vi.fn(),getAttemptByKey:vi.fn(),listAttempts:vi.fn(),getBalance:vi.fn(async()=>({amountStroops:'9007199254740993',ledger:123,updatedAt:Date.now()})),listTransfers:vi.fn(async()=>({items:[transfer]}))};}
+function service():PaymentAdapter {return {network:'TESTNET',address,supportedDestinations:['classic'],prepare:vi.fn(),createAttempt:vi.fn(),approve:vi.fn(),getAttempt:vi.fn(),getAttemptByKey:vi.fn(),listAttempts:vi.fn(async()=>({items:[]})),getBalance:vi.fn(async()=>({amountStroops:'9007199254740993',ledger:123,updatedAt:Date.now()})),listTransfers:vi.fn(async()=>({items:[transfer]}))};}
 function wrap(adapter:PaymentAdapter|null) {return <MemoryRouter><PaymentContext.Provider value={adapter}><Overview/></PaymentContext.Provider></MemoryRouter>;}
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();vi.restoreAllMocks();sessionStorage.clear();});
 it('displays exact indexed amounts and verified receipt links for the owned wallet',async()=>{
@@ -37,10 +37,10 @@ it('shows missing indexing without inventing a zero balance or transactions',asy
   render(wrap(adapter));await screen.findByText(/Balance awaiting indexing/);expect(screen.getByText('No verified transfers indexed yet.')).toBeTruthy();expect(screen.queryByText('0.0000000 XLM')).toBeNull();
 });
 it('updates the age warning without requiring a rerender from another screen',async()=>{
-  vi.useFakeTimers();render(wrap(service()));await act(async()=>{});
+  vi.useFakeTimers();const adapter=service();const updatedAt=Date.now();vi.mocked(adapter.getBalance!).mockResolvedValue({amountStroops:'9007199254740993',ledger:123,updatedAt});render(wrap(adapter));await act(async()=>{});
   expect(screen.queryByText(/balance is over a minute old/)).toBeNull();
   await act(async()=>{await vi.advanceTimersByTimeAsync(70000);});
-  expect(screen.getByText(/balance is over a minute old/)).toBeTruthy();
+  expect(screen.getByText(/balance is over a minute old/)).toBeTruthy();expect(adapter.getBalance).toHaveBeenCalledTimes(5);
 });
 it('ignores late reads from a disconnected wallet and clears its data on wallet change',async()=>{
   const first=service();let complete:((value:{amountStroops:string;ledger:number;updatedAt:number})=>void)|undefined;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { usePayments } from './context';
 import { checkQuote, destinationError, explorerLink, NETWORK, statusLabel, stroops, xlm, type Attempt, type Quote, type Invoice } from './model';
 
@@ -10,6 +10,7 @@ export function Send({request,checkoutUnavailable=false}:{request?:Invoice;check
 }
 function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavailable:boolean}) {
   const adapter = usePayments()!;
+  const [params] = useSearchParams();
   const storageKey = `cherrypay:pending:${NETWORK}:${adapter.address}`;
   const [key, setKey] = useState(() => { try { return localStorage.getItem(storageKey) ?? ''; } catch { return 'storage-unavailable'; } });
   useEffect(() => {
@@ -17,7 +18,7 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
   }, [storageKey]);
-  const [destination, setDestination] = useState(request?.destination??'');
+  const [destination, setDestination] = useState(request?.destination ?? params.get('to') ?? '');
   const [amount, setAmount] = useState(request?xlm(request.remainingStroops):'');
   const [quote, setQuote] = useState<Quote>();
   const [attempt, setAttempt] = useState<Attempt>();
@@ -71,8 +72,8 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
     return () => { active = false; window.clearInterval(timer); };
   }, [adapter, key, polling, validateAttempt]);
   const terminal = attempt && (attempt.status === 'failed' || attempt.status === 'rejected' || (attempt.status === 'confirmed' && attempt.verified));
-  return <section className="card payment-screen"><span className="eyebrow">STELLAR TESTNET</span><h1>Send XLM</h1>
-    <p>Review the exact destination, amount and fee before approving with your wallet.</p>
+  return <section className="card payment-screen send-screen"><span className="eyebrow">WALLET PAYMENT</span><h1>Send XLM</h1>
+    <p>Choose a recipient and amount. Review the fee before approving.</p><ol className="payment-steps" aria-label="Payment progress"><li aria-current={!quote && !key ? 'step' : undefined}>1 · Details</li><li aria-current={quote ? 'step' : undefined}>2 · Review</li><li aria-current={key && !quote ? 'step' : undefined}>3 · Status</li></ol>
     {request&&<p>Invoice: <strong>{request.invoiceReference}</strong> · {request.merchantName}. <Link to="/send">Manage another saved payment</Link></p>}
     {quote?.paymentRequestId&&!request&&<p>Linked invoice: <Link to={`/pay/${quote.paymentRequestId}`}>View invoice checkout</Link></p>}
     <p ref={alert} tabIndex={-1} role="alert" className="error">{error}</p>
@@ -84,9 +85,9 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
       const preview = await adapter.prepare(requested, previewKey); checkQuote(preview, requested); setQuote(preview); setAccepted(false); }); }}>
       <fieldset disabled={busy || !!quote || requestClosed}><legend>Payment details</legend>
         <label htmlFor="destination">Recipient address</label><input id="destination" readOnly={!!request} autoComplete="off" spellCheck={false} value={destination} onChange={e => setDestination(e.target.value)} aria-invalid={!!destinationFeedback} aria-describedby="destination-feedback" required/>
-        <p id="destination-feedback">{destinationFeedback || 'Only backend-enabled Testnet destinations are accepted. Memo-required exchange deposits are not supported.'}</p>
+        <p id="destination-feedback">{destinationFeedback || 'Use a Stellar Testnet G- or C-address. Memo-required exchange deposits are not supported.'}</p>
         <label htmlFor="amount">Exact amount (XLM)</label><input id="amount" readOnly={!!request} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} aria-describedby="amount-help" required/>
-        <p id="amount-help">Up to 7 decimal places. No rounding or currency conversion.</p>
+        <p id="amount-help">XLM only · up to 7 decimal places.</p>
       </fieldset>
       {!quote && <button disabled={busy || requestClosed || !!request?.paymentPending} type="submit">{busy ? 'Loading fee preview…' : 'Preview payment'}</button>}
     </form>}
