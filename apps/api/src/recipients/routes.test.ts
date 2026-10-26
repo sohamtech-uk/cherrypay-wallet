@@ -12,7 +12,7 @@ vi.mock('../store.js',()=>({
   db:{query:mock.query},
   normalizeEmail:(email:string)=>{
     const normalized=email.trim().toLowerCase();
-    if(!/^[^\\s@]{1,64}@[^\\s@]+\\.[^\\s@]+$/.test(normalized)||normalized.length>254)throw Error('INVALID_EMAIL');
+    if(!normalized.includes('@')||!normalized.includes('.')||normalized.includes(' '))throw Error('INVALID_EMAIL');
     return normalized;
   },
 }));
@@ -30,7 +30,7 @@ beforeEach(async()=>{
   mock.verifyEmail.mockResolvedValue(true);
   mock.query.mockResolvedValue({rows:[]});
   sendEmail.mockResolvedValue(undefined);
-  app=Fastify({logger:false});
+  app=Fastify({logger:false,ajv:{customOptions:{coerceTypes:false,removeAdditional:false}}});
   await registerRecipientDirectoryRoutes(app,sendEmail);
 });
 afterEach(async()=>{await app.close();});
