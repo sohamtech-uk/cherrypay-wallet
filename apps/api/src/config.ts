@@ -46,5 +46,5 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env) {
  if (url.pathname !== '/' || url.search || url.hash) throw new Error('WALLET_ORIGIN must be an origin only');
  const rpID = env.WEBAUTHN_RP_ID ?? url.hostname;
  if (rpID !== url.hostname && !url.hostname.endsWith('.' + rpID)) throw new Error('WEBAUTHN_RP_ID must match origin hostname or its parent domain');
- return { origin:url.origin, rpID, port:Number(env.PORT ?? '3001'), network:STELLAR_NETWORK, rpcUrl:TESTNET_RPC_URL, horizonUrl:TESTNET_HORIZON_URL, integrations: integrationConfig(env), invoiceWebhook:invoiceWebhookConfig(env) };
+ return { origin:url.origin, rpID, port:Number(env.PORT ?? '3001'), network:STELLAR_NETWORK, rpcUrl:TESTNET_RPC_URL, horizonUrl:TESTNET_HORIZON_URL, integrations: integrationConfig(env), invoiceWebhook:invoiceWebhookConfig(env), mapsBrowserKey:env.GOOGLE_MAPS_BROWSER_KEY, marketDemoKey:env.COINGECKO_DEMO_API_KEY };
 }

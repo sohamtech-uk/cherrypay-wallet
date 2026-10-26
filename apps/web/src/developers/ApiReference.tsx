@@ -21,7 +21,7 @@ function groupFor(path: string): string {
   if (path.includes('/payroll')) return 'Payroll';
   if (path.includes('/passkeys/') || path.includes('/session/') || path === '/api/v1/wallet/me') return 'Authentication';
   if (path.startsWith('/api/v1/smart-account/') || path === '/api/v1/wallets' || /^\/api\/v1\/wallets\/\{walletId\}$/.test(path)) return 'Smart wallet';
-  if (path.startsWith('/api/v1/aurora/') || path.startsWith('/api/v1/intelligence/')) return 'Integrations';
+  if (path.startsWith('/api/v1/aurora/') || path.startsWith('/api/v1/intelligence/') || path.startsWith('/api/v1/market/')) return 'Integrations';
   if (path === '/health' || path === '/ready' || path === '/api/v1/network') return 'Service status';
   return 'Transfers & activity';
 }

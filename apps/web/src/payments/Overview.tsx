@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, Clock3, Copy, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Clock3, Copy, Eye, EyeOff, RefreshCw, ShieldCheck, Plus, CircleDollarSign } from 'lucide-react';
+import { UpgradeBanner } from '../Upgrade';
+import { MarketChart } from './MarketChart';
 import { usePayments } from './context';
 import { explorerLink, NETWORK, xlm, type Attempt, type PaymentAdapter } from './model';
 import { PaymentAttention } from './PaymentAttention';
@@ -8,6 +10,7 @@ import { FundingPrompt } from './FundingPrompt';
 import { WatchAccount } from '../WatchAccount';
 
 type Snapshot = Awaited<ReturnType<NonNullable<PaymentAdapter['getBalance']>>>;
+function balanceLabel(stroops:string){const [whole,fraction]=xlm(stroops).split('.');const decimals=fraction.replace(/0+$/,'');return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(decimals?'.'+decimals:'');}
 function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
   const [snapshot, setSnapshot] = useState<Snapshot>(null);
   const [items, setItems] = useState<Attempt[]>([]);
@@ -19,6 +22,7 @@ function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
   const [copyStatus, setCopyStatus] = useState('');
   const [showAddress, setShowAddress] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
+  const [showAssets,setShowAssets]=useState(false);
   useEffect(() => {
     let active = true;
     setLoading(true); setSnapshot(null); setItems([]); setBalanceError(''); setHistoryError('');
@@ -54,16 +58,18 @@ function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
     const clock = setInterval(() => setNow(Date.now()), 10000);
     return () => { active = false; clearInterval(clock); clearInterval(refreshTimer); };
   }, [adapter, refresh]);
-  return <><FundingPrompt/><PaymentAttention adapter={adapter}/><div className="wallet-home">
+  return <><UpgradeBanner/><FundingPrompt/><PaymentAttention adapter={adapter}/><div className="wallet-home">
     <section className="card wallet-hero" aria-label="Connected wallet overview">
-      <div className="wallet-hero-top"><span className="wallet-kicker">WALLET BALANCE</span><span className="wallet-network"><ShieldCheck size={15}/> Stellar Testnet</span></div>
-      <div className="wallet-hero-balance">{!showBalance ? '••••••••' : snapshot ? <>{xlm(snapshot.amountStroops)} <span>XLM</span></> : '—'}</div>
+      <div className="wallet-hero-top"><span className="wallet-kicker">LUMENS</span><span className="wallet-network"><ShieldCheck size={15}/> Stellar Testnet</span></div>
+      <div className="wallet-hero-balance">{!showBalance ? '••••••••' : snapshot ? <>{balanceLabel(snapshot.amountStroops)} <span>XLM</span></> : '—'}</div>
       {loading && <p role="status">Loading wallet overview…</p>}
       {!loading && !snapshot && !balanceError && <p>Balance awaiting indexing. No zero balance has been assumed.</p>}
       {balanceError && <p role="alert" className="error">{balanceError}</p>}
       {snapshot && <div className="wallet-balance-meta">Verified ledger {snapshot.ledger} · Updated <time dateTime={new Date(snapshot.updatedAt).toISOString()}>{new Date(snapshot.updatedAt).toLocaleString()}</time>{now - snapshot.updatedAt > 60000 && <p role="status">This balance is over a minute old. Refresh before planning a payment.</p>}</div>}
       <button className="wallet-privacy-toggle" aria-pressed={!showBalance} onClick={()=>setShowBalance(v=>!v)}>{showBalance?<EyeOff size={16}/>:<Eye size={16}/>} {showBalance?"Hide balance":"Show balance"}</button><div className="wallet-hero-actions"><Link to="/send" className="wallet-primary-action"><ArrowUpRight size={18}/> Send XLM</Link><Link to="/receive" className="wallet-primary-action wallet-receive-action"><ArrowDownLeft size={18}/> Receive XLM</Link><button className="wallet-refresh" aria-label="Refresh overview" disabled={loading} onClick={()=>setRefresh(value=>value+1)}><RefreshCw size={18}/></button></div>
     </section>
+    <section className="card wallet-assets" aria-label="Wallet assets"><h2>Your assets</h2><div className="asset-tiles"><a className="asset-tile selected" href="#xlm-market"><CircleDollarSign size={32}/><div><strong>{showBalance&&snapshot?balanceLabel(snapshot.amountStroops):showBalance?'—':'••••••'}</strong><small>XLM · Stellar Testnet</small></div></a><button className="asset-tile add-asset" aria-expanded={showAssets} onClick={()=>setShowAssets(!showAssets)}><Plus size={25}/> Add asset</button></div>{showAssets&&<p className="asset-notice" role="status">Only Testnet XLM is supported for payments in this release. Additional assets will appear here when available.</p>}<p className="small-copy">C-address smart wallet · Classic-account XLM reserve does not apply.</p></section>
+    <div id="xlm-market" className="card market-card"><MarketChart/></div>
     <section className="card wallet-address-card">
       <div className="wallet-card-heading"><div><h2>Your wallet address</h2></div><span className="wallet-pill">Testnet</span></div>
       <div className="wallet-address-row"><code className="mono">{showAddress ? adapter.address : `${adapter.address.slice(0, 5)}••••••••${adapter.address.slice(-5)}`}</code><button className="secondary-button" aria-pressed={showAddress} onClick={()=>setShowAddress(v=>!v)}>{showAddress?<EyeOff size={16}/>:<Eye size={16}/>} {showAddress?"Hide address":"Show address"}</button><button className="secondary-button" onClick={async()=>{try{await navigator.clipboard.writeText(adapter.address);setCopyStatus('Wallet address copied.');}catch{setCopyStatus('Copy unavailable. Select the address to copy manually.');}}}><Copy size={16}/> Copy</button></div><p role="status">{copyStatus}</p>
@@ -85,7 +91,7 @@ function WalletOverview({ adapter }: { adapter: PaymentAdapter }) {
 export function Overview() {
   const adapter = usePayments();
   return <>
-    <div className="heading"><div><span className="eyebrow">MY WALLET</span><h1>Wallet dashboard</h1><p>Your balance, payments and recent activity.</p></div><Link className="secondary-button" to="/business">Business dashboard</Link></div>
+    <div className="heading"><div><span className="eyebrow">MY WALLET</span><h1>Home</h1><p>Your balance, payments and recent activity.</p></div><Link className="secondary-button" to="/business">Business dashboard</Link></div>
     {adapter?.network === NETWORK ? <WalletOverview key={adapter.address} adapter={adapter}/> : <>
       <section className="card"><h2>Connect your passkey profile</h2><p>Sign in above to see your linked wallet’s balance and verified transfers. Your wallet is created automatically when the service is available.</p></section>
       <details className="card"><summary>Watch a classic Testnet account</summary><WatchAccount/></details>
