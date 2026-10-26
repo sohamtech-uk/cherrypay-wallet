@@ -1,0 +1,46 @@
+.payment-screen { max-width: 760px; }
+.payment-screen p { color: #475569; }
+.payment-screen .error { color: #a71938; }
+.payment-screen label { display: block; font-weight: 650; margin: 16px 0 8px; }
+.payment-screen input:not([type=checkbox]), .payment-screen textarea, .payment-screen select { width: 100%; min-width: 0; max-width: 100%; padding: 12px; border: 1px solid #64748b; border-radius: 8px; font: inherit; }
+.payment-screen textarea { resize: vertical; overflow-wrap: anywhere; }
+.payment-screen fieldset { border: 0; padding: 0; min-width: 0; }
+.payment-screen legend { font-weight: 700; }
+.payment-screen dd { margin: 4px 0 18px; overflow-wrap: anywhere; }
+.payment-screen dt { color: #475569; font-weight: 650; }
+.payment-screen button, .payment-screen .secondary-button { margin: 8px 8px 8px 0; min-height: 44px; }
+.payment-screen button:not(.secondary-button) { background: #b51e4b; }
+.payment-screen button:disabled { background: #e2e8f0; color: #475569; }
+.payment-screen .check-label { display: flex; gap: 10px; align-items: flex-start; }
+.payment-screen input[type=checkbox] { width: 22px; height: 22px; flex-shrink: 0; }
+.receive-qr { background: white; padding: 20px; width: fit-content; max-width: 100%; }
+.receive-qr svg { max-width: 100%; height: auto; }
+.transaction-list { list-style: none; padding: 0; }
+.transaction-list li { border-top: 1px solid #cbd5e1; padding: 20px 0; }
+:focus-visible { outline: 3px solid #155ac4; outline-offset: 3px; }
+.skip-link { position: fixed; top: -100px; left: 12px; z-index: 10; background: white; color: #172438; padding: 12px; }
+.skip-link:focus { top: 12px; }
+@media (max-width: 400px) { .payment-screen { padding: 14px; } .payment-screen h1 { font-size: 25px; } }
+
+
+.wallet-amount { font-size: clamp(1.25rem, 4vw, 2rem); font-weight: 750; overflow-wrap: anywhere; }
+.card summary { cursor: pointer; font-weight: 650; padding: 8px 0; }
+
+/* External integrations keep network and availability visible at narrow widths. */
+.mainnet-tag, .read-only-tag { display: inline-block; padding: 8px 12px; border-radius: 8px; font-size: 11px; font-weight: 750; letter-spacing: .04em; }
+.mainnet-tag { background: #fff2d6; color: #70420c; }
+.read-only-tag { background: #ece8ff; color: #493a83; }
+.integration-screen > h1 { margin-top: 10px; }
+.integration-notice { padding: 16px; border: 1px solid #e0c28b; border-radius: 12px; background: #fff9ec; margin: 20px 0; }
+.integration-notice p { margin-bottom: 0; }
+.integration-deposit { padding: 18px; border: 1px solid #c9bee8; border-radius: 12px; background: #f7f4fe; }
+.integration-screen section { margin-top: 24px; }
+.integration-screen a { overflow-wrap: anywhere; }
+.integration-screen .mono { overflow-wrap: anywhere; }
+.integration-screen dd { font-variant-numeric: tabular-nums; }
+
+.payroll-table { overflow-x: auto; margin: 1rem 0; }
+.payroll-table table { width: 100%; border-collapse: collapse; }
+.payroll-table th, .payroll-table td { padding: .75rem; text-align: left; border-bottom: 1px solid #cbd5e1; vertical-align: top; }
+.payroll-address { display: block; max-width: 22rem; overflow-wrap: anywhere; }
+.payment-screen textarea { display: block; width: 100%; box-sizing: border-box; padding: .75rem; font: inherit; }

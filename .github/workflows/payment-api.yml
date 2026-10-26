@@ -1,0 +1,69 @@
+name: Payment API checks
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'compose.yaml'
+      - 'compose.payments.yaml'
+      - 'compose.activation.yaml'
+      - 'docs/payments.openapi.json'
+      - '.github/workflows/payment-api.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'apps/api/**'
+      - 'compose.yaml'
+      - 'compose.payments.yaml'
+      - 'compose.activation.yaml'
+      - 'docs/payments.openapi.json'
+      - '.github/workflows/payment-api.yml'
+permissions:
+  contents: read
+jobs:
+  payment-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: integration_test_only
+          POSTGRES_DB: cherrypay_wallet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet -d cherrypay_wallet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_NAME: cherrypay_wallet
+      DB_USER: wallet
+      DB_PASSWORD: integration_test_only
+      RUN_DB_INTEGRATION: '1'
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - name: Validate payment Compose override
+        working-directory: .
+        env:
+          WALLET_PAYMENT_MANIFEST: /tmp/cherrypay-approved-manifest.json
+        run: docker compose --env-file /dev/null -f compose.yaml -f compose.payments.yaml config --quiet
+      - name: Validate activation Compose override
+        working-directory: .
+        run: docker compose --env-file /dev/null -f compose.yaml -f compose.activation.yaml config --quiet
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run schema
+      - run: git diff --exit-code -- ../../docs/payments.openapi.json
+

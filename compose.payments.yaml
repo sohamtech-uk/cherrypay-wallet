@@ -1,0 +1,17 @@
+# Opt-in Testnet override. The manifest contains public configuration only.
+# docker compose -f compose.yaml -f compose.payments.yaml ...
+services:
+  api:
+    command: ["npm", "start"]
+    environment:
+      WALLET_PAYMENTS_ENABLED: ${WALLET_PAYMENTS_ENABLED:-false}
+      WALLET_PAYMENT_MANIFEST: /run/cherrypay/payment-manifest.json
+      STELLAR_RELAYER_SECRET: ${STELLAR_RELAYER_SECRET:-}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+    volumes:
+      - type: bind
+        source: ${WALLET_PAYMENT_MANIFEST:?Set the absolute path to the reviewed payment manifest}
+        target: /run/cherrypay/payment-manifest.json
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,55 @@
+import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
+import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
+import * as store from './store.js';
+export async function beginEmailOnboarding(rpID:string,email:string) {
+ const account=await store.getOrCreateEmailAccount(email);
+ const credentials=await store.getCredentials(account.id);
+ if(credentials.length) return {mode:'authenticate' as const,accountID:account.id,...await beginAuthentication(account.id,rpID)};
+ return {mode:'register' as const,...await initialRegistrationOptions(rpID,account,credentials)};
+}
+async function initialRegistrationOptions(rpID:string,account:{id:string;webauthn_user_id:string},credentials:Awaited<ReturnType<typeof store.getCredentials>>,accountID?:string,token?:string) {
+ const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',supportedAlgorithmIDs:[-7],authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
+ return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
+}
+export async function beginRegistration(rpID:string,accountID?:string,token?:string,email?:string){
+ const account=accountID?await store.getAccount(accountID):await store.createAccount(email);
+ if(!account)throw Error('Account not found');
+ const credentials=await store.getCredentials(account.id);
+ if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');
+ if(!accountID&&credentials.length)throw Error('Existing passkey authentication required');
+ return initialRegistrationOptions(rpID,account,credentials,accountID,token);
+}
+export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string){
+ const count=await store.withLockedAccount(accountID,async client=>{
+  const challenge=await store.consumeLockedChallenge(client,requestID,accountID,token?'register_backup':'register_initial',token);
+  const credentials=await store.credentialsLocked(client,accountID);
+  if(token?!credentials.length:!!credentials.length)throw Error('Invalid enrollment state');
+  const verified=await verifyRegistrationResponse({response,expectedChallenge:challenge,expectedOrigin:origin,expectedRPID:rpID,requireUserVerification:true,supportedAlgorithmIDs:[-7]});
+  if(!verified.verified||!verified.registrationInfo)throw Error('Passkey verification failed');
+  const c=verified.registrationInfo.credential;
+  await store.addCredentialLocked(client,accountID,{id:c.id,publicKey:c.publicKey,counter:c.counter,transports:response.response.transports});
+  return credentials.length+1;
+ });
+ return {verified:true,accountID,credentialCount:count,backupCredentialEnrolled:count>=2,recoveryReady:false,...await store.createSession(accountID)};
+}
+export async function beginAuthentication(accountID:string,rpID:string){
+ const credentials=await store.getCredentials(accountID);
+ if(!credentials.length)throw Error('Unknown account');
+ const options=await generateAuthenticationOptions({rpID,userVerification:'required',allowCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
+ return {requestID:await store.newChallenge(accountID,'authenticate',options.challenge),options};
+}
+export async function finishAuthentication(accountID:string,requestID:string,response:AuthenticationResponseJSON,rpID:string,origin:string){
+ const count=await store.withLockedAccount(accountID,async client=>{
+  const challenge=await store.consumeLockedChallenge(client,requestID,accountID,'authenticate');
+  const credentials=await store.credentialsLocked(client,accountID),c=credentials.find(x=>x.id===response.id);
+  if(!c)throw Error('Unknown credential');
+  const result=await verifyAuthenticationResponse({response,expectedChallenge:challenge,expectedOrigin:origin,expectedRPID:rpID,credential:{id:c.id,publicKey:new Uint8Array(Buffer.from(c.public_key,'base64')),counter:Number(c.counter),transports:c.transports as any},requireUserVerification:true});
+  if(!result.verified)throw Error('Authentication failed');
+  await store.updateCounterLocked(client,c.id,accountID,Number(c.counter),result.authenticationInfo.newCounter);
+  return credentials.length;
+ });
+ return {verified:true,accountID,credentialCount:count,...await store.createSession(accountID)};
+}
+
+
+

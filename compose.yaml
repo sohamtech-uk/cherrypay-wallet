@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cherrypay_wallet}
+      POSTGRES_USER: ${DB_USER:-wallet}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - wallet_postgres:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 forces a TCP check: during first-time init the image runs a temporary
+      # socket-only server, so a socket check reports "ready" before the API can connect.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DB_USER:-wallet} -d ${DB_NAME:-cherrypay_wallet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      HOST: "0.0.0.0"
+      WALLET_ORIGIN: ${WALLET_ORIGIN:-http://localhost:5174}
+      WEBAUTHN_RP_ID: localhost
+      AURORA_INTENTS_NETWORK: ${AURORA_INTENTS_NETWORK:-TESTNET}
+      AURORA_INTENTS_ENABLED: ${AURORA_INTENTS_ENABLED:-false}
+      AURORA_INTENTS_API_KEY: ${AURORA_INTENTS_API_KEY:-}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-wallet}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: ${DB_NAME:-cherrypay_wallet}
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./apps/api/src:/app/src:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
+    environment:
+      NODE_ENV: development
+      WALLET_API_PROXY_TARGET: http://api:3001
+    ports:
+      - "127.0.0.1:${WALLET_WEB_PORT:-5174}:5173"
+    volumes:
+      - ./apps/web/src:/app/src:ro
+      - ./apps/web/index.html:/app/index.html:ro
+      - ./apps/web/vite.config.ts:/app/vite.config.ts:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  wallet_postgres:
+

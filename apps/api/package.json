@@ -1,0 +1,33 @@
+{
+  "name": "@cherrypay/wallet-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "schema": "node --import tsx scripts/export-openapi.ts",
+    "wallet:provision": "node --import tsx src/smart-account/provision-cli.ts",
+    "wallet:recovery-audit": "node --import tsx src/smart-account/recovery-audit-cli.ts"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "11.0.0",
+    "@stellar/stellar-sdk": "16.3.0",
+    "fastify": "5.2.1",
+    "pg": "8.16.3",
+    "smart-account-kit-bindings": "0.4.0"
+  },
+  "devDependencies": {
+    "@simplewebauthn/types": "11.0.0",
+    "@types/node": "22.10.0",
+    "@types/pg": "8.16.0",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
