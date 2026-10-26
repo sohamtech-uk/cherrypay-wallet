@@ -100,3 +100,15 @@ describe('two separately owned contract wallets', () => {
     expect(await store.history(receiver.address)).toHaveLength(0);
   });
 });
+
+it('sends between verified primary wallets while recovery remains unavailable',async()=>{
+  vi.mocked(policies.current).mockImplementation(async address=>({fingerprint:address===receiver.address?receiver.policy:wallet.policy,recoveryReady:false,spendingReady:true}));
+  const original=await create(),event=transfer({to:receiver.address});
+  vi.mocked(chain.outcome).mockResolvedValue({status:'SUCCESS',transactionHash:txHash,events:[event]});
+  expect(await service.approve(wallet.owner,wallet.id,original.id,'signed-auth')).toMatchObject({status:'confirmed',verified:true});
+  expect((await store.history(receiver.address))[0].event).toEqual(event);
+});
+it('does not allow recovery readiness to override an explicit spending refusal',async()=>{
+  vi.mocked(policies.current).mockResolvedValue({fingerprint:wallet.policy,recoveryReady:true,spendingReady:false});
+  await expect(create()).rejects.toThrow();expect(chain.prepare).not.toHaveBeenCalled();expect(chain.submit).not.toHaveBeenCalled();
+});

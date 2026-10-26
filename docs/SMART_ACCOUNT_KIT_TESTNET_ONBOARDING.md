@@ -1,5 +1,7 @@
 # Smart Account Kit Testnet onboarding — gated rollout
 
+For automatic single-primary wallets, use the explicit [primary Testnet payment mode](PRIMARY_TESTNET_PAYMENTS.md). The two-rule manifest and independent recovery requirements below continue to apply to the reviewed recovery mode.
+
 This project reuses the existing Stellar Smart Account Kit bindings and the pinned OpenZeppelin smart-account contract. **Do not deploy the legacy WASM hash in `kit-manifest.ts`**; `rejectLegacyAccountWasm` deliberately blocks it.
 
 ## Phase A — verify the upstream artifacts (operator action)

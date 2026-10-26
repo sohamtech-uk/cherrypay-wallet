@@ -1,5 +1,7 @@
 # Configure the existing Testnet payment flow
 
+For automatic single-primary wallets, use the explicit [primary Testnet payment mode](PRIMARY_TESTNET_PAYMENTS.md). The two-rule manifest and independent recovery requirements below continue to apply to the reviewed recovery mode.
+
 The default server keeps payments disabled. The normal server entry point can now
 load an explicitly enabled, reviewed deployment manifest, verify the saved wallet
 bindings and construct the payment/approval/receive adapters before listening.

@@ -12,14 +12,14 @@ import Fastify from 'fastify';
 import {getConfig} from './config.js';
 import {beginEmailOnboarding,beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
 import {sessionAccount,hashToken,getCredentials,revokeSession,db,getAccountByEmail,emailForAccount} from './store.js';
-export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; deployments?: AutomaticDeploymentService; indexer?: WalletBackendClient; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
+export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; deployments?: AutomaticDeploymentService; indexer?: WalletBackendClient; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; ensureOwnerWallet?:PaymentDependencies['ensureOwnerWallet']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
 const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,trustProxy:'loopback',bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
 const token=(h:string|undefined)=>h?.startsWith('Bearer ')?h.slice(7):undefined;
 const attempts=new Map<string,{count:number;reset:number}>();
 function limited(ip:string,route:string){const key=ip+':'+route,now=Date.now(),old=attempts.get(key);if(!old||old.reset<=now){attempts.set(key,{count:1,reset:now+60_000});return false;}old.count++;return old.count>10;}
 
 app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==config.origin)return reply.code(403).send({error:'Untrusted origin'});if(req.method==='POST'&&req.url.startsWith('/api/v1/passkeys/')&&limited(req.ip,req.url))return reply.code(429).send({error:'Too many attempts'});});
-app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments}));
+app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments,walletPaymentsEnabled:!!options.payments}));
 app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:!!options.deployments}));
 app.post('/api/v1/passkeys/onboarding/options', {schema:{body:{type:'object',required:['email'],additionalProperties:false,properties:{email:{type:'string',minLength:3,maxLength:254}}}}}, async(req,reply)=>{
@@ -52,6 +52,7 @@ await registerIntegrationRoutes(app, config.integrations);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 const paymentDependencies: PaymentDependencies | undefined = options.payments ? {
   service: options.payments,
+  ensureOwnerWallet: options.ensureOwnerWallet,
   indexer: options.indexer,
   receiveRoute: options.receiveRoute,
   approvals: options.passkeyCodec ? new PasskeyApprovalService(options.payments, new PostgresApprovalTickets(), options.passkeyCodec, postgresAssertionVerifier(config.rpID, config.origin), config.rpID) : undefined,

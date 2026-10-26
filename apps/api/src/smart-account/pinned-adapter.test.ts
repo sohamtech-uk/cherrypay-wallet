@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Account, Address, SorobanDataBuilder, StrKey, TransactionBuilder, buildAuthorizationEntryPreimage, hash, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { Client, type ContextRule, type Signer } from 'smart-account-kit-bindings';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
-import { ACCOUNT_V080_HASH, PinnedAccountAdapter, accountChallenge, compactP256, credentialKeyData, encodeAccountAssertion, type ApprovedAccount, type AccountRpc } from './pinned-adapter.js';
+import { ACCOUNT_V080_HASH, PinnedAccountAdapter, accountChallenge, compactP256, credentialKeyData, encodeAccountAssertion, type ApprovedAccount, type PrimaryAccount, type AccountRpc } from './pinned-adapter.js';
 import { addressCredentials, bindAuthorization, transferOperation } from '../payments/stellar.js';
 import { PASSPHRASE, type Attempt } from '../payments/model.js';
 import { intent, wallet, destination } from '../payments/test-fixtures.js';
@@ -60,11 +60,11 @@ it('rejects malformed and noncanonical DER signatures and normalizes high S',()=
   expect(compactP256(der).subarray(32).toString('hex')).toBe('1'.padStart(64,'0'));
   for(const b of [Buffer.alloc(0),Buffer.from('3006020100020101','hex'),Buffer.from('300702020001020101','hex'),Buffer.concat([der,Buffer.from([0])])])expect(()=>compactP256(b)).toThrow();
 });
-function fixture() {
+function fixture(primaryOnly=false) {
   const p=key('primary'),b=key('backup');
   const approved:ApprovedAccount={walletId:wallet.id,owner:wallet.owner,address:wallet.address,accountWasmHash:ACCOUNT_V080_HASH,verifierAddress:verifier,verifierWasmHash:'a'.repeat(64),primaryRuleId:1,backupRuleId:2,primaryCredentialId:p.credential.id,backupCredentialId:b.credential.id,deploymentTransactionHash:'b'.repeat(64),recoveryTransactionHash:'c'.repeat(64)};
   const rule=(id:number,k:typeof p):ContextRule=>({id,name:'rule',context_type:{tag:'Default',values:undefined},signers:[{tag:'External',values:[verifier,credentialKeyData(k.credential)]}],signer_ids:[id],policies:[],policy_ids:[],valid_until:undefined});
-  const rules=[rule(1,p),rule(2,b)];let count=2,omitIds=false,lookupLedger=100;
+  const rules=primaryOnly?[rule(0,p)]:[rule(1,p),rule(2,b)];let count=primaryOnly?1:2,omitIds=false,lookupLedger=100;
   const spec=new Client({contractId:wallet.address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec;
   const server={getNetwork:vi.fn(),getLedgerEntries:vi.fn(),simulateTransaction:vi.fn(async(tx:{toEnvelope:()=>xdr.TransactionEnvelope})=>{
     const fn=tx.toEnvelope().v1().tx().operations()[0].body().invokeHostFunctionOp().hostFunction().invokeContract();
@@ -73,7 +73,9 @@ function fixture() {
     if(omitIds && name==='get_context_rule')retval=xdr.ScVal.scvMap(retval.map()!.filter(e=>!['signer_ids','policy_ids'].includes(e.key().sym().toString())));
     return {_parsed:true,id:'1',latestLedger:name==='get_signer_id'?lookupLedger:100,events:[],minResourceFee:'0',transactionData:new SorobanDataBuilder(),result:{auth:[],retval}};
   })};
-  const adapter=new PinnedAccountAdapter(server as unknown as AccountRpc,[approved],async()=>[p.credential,b.credential]);
+  const {backupRuleId:_rule,backupCredentialId:_credential,recoveryTransactionHash:_recovery,...base}=approved;
+  const primary:PrimaryAccount={...base,primaryRuleId:0,mode:'primary-passkey'};
+  const adapter=new PinnedAccountAdapter(server as unknown as AccountRpc,primaryOnly?async address=>address===wallet.address?primary:undefined:[approved],async()=>[p.credential,b.credential]);
   return {adapter,approved,rules,p,b,server,setCount:(v:number)=>{count=v;},hydrate:(ledger=100)=>{omitIds=true;lookupLedger=ledger;}};
 }
 describe('pinned on-chain rules and owned credentials',()=>{
@@ -145,4 +147,20 @@ describe('pinned on-chain rules and owned credentials',()=>{
     });
     await expect(f.adapter.describe(w,a)).rejects.toThrow('ACCOUNT_DIGEST_MISMATCH');
   });
+});
+
+it('authorizes a primary-only wallet without inventing recovery readiness',async()=>{
+  const f=fixture(true),policy=await f.adapter.current(wallet.address);
+  expect(policy).toMatchObject({spendingReady:true,recoveryReady:false});
+  const w={...wallet,policy:policy.fingerprint},a={id:'primary-attempt',walletId:w.id,from:w.address,policy:w.policy,intent,prepared:{authXdr:entry(true).toXDR('base64'),expirationLedger:130,expiresAt:Date.now()+60000}} as Attempt;
+  const plan=await f.adapter.describe(w,a);
+  expect(plan.credentialIds).toEqual([f.p.credential.id]);expect(plan.challenge).toBe(accountChallenge(entry(true),0));
+  expect(await f.adapter.encode(w,a,assertion(f.p,plan.challenge).value)).toBeTruthy();
+  await expect(f.adapter.encode(w,a,assertion(f.b,plan.challenge).value)).rejects.toThrow('UNAUTHORIZED_TRANSFER_CREDENTIAL');
+  f.rules[0].signers[0]={tag:'External',values:[verifier,credentialKeyData(f.b.credential)]};
+  await expect(f.adapter.current(wallet.address)).rejects.toThrow('ONCHAIN_SIGNER_KEY_MISMATCH');
+});
+it('never downgrades an approved two-rule wallet or accepts an extra rule in primary mode',async()=>{
+  const legacy=fixture();legacy.setCount(1);await expect(legacy.adapter.current(wallet.address)).rejects.toThrow('UNEXPECTED_ACCOUNT_RULES');
+  const primary=fixture(true);primary.setCount(2);await expect(primary.adapter.current(wallet.address)).rejects.toThrow('UNEXPECTED_ACCOUNT_RULES');
 });

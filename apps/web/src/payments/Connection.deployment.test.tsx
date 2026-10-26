@@ -150,3 +150,33 @@ it.each(['AWAITING_PASSKEY', 'PENDING', 'NOT_STARTED'])('resumes a %s reservatio
   expect(startAuthentication).toHaveBeenCalledTimes(1);
   expect(startRegistration).not.toHaveBeenCalled();
 });
+
+it('opens a newly confirmed primary wallet automatically without another login ceremony',async()=>{
+  const {StrKey}=await import('@stellar/stellar-sdk'),address=StrKey.encodeContract(Buffer.alloc(32,1));
+  let confirmed=false;
+  const row={id:address,address,network:'TESTNET'};
+  const fetcher=fixture(async()=>response(confirmed?{
+    status:'CONFIRMED',network:'TESTNET',deploymentEnabled:true,spendingEnabled:true,walletId:address,recoveryReady:false,
+    onChainSignerBound:true,address,transactionHash:'a'.repeat(64),confirmedLedger:200,primaryRuleId:0,primaryCredentialId:'primary',
+    funding:{status:'FUNDED',amountStroops:'100000000000',transactionHash:'b'.repeat(64),ledger:201}
+  }:{status:'PENDING',network:'TESTNET',deploymentEnabled:true,spendingEnabled:false,recoveryReady:false,onChainSignerBound:false}));
+  const original=fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async(url,init)=>{
+    if(url.endsWith('/wallets'))return response({network:'TESTNET',items:confirmed?[row]:[]});
+    if(url.endsWith('/wallets/'+address))return response({...row,supportedDestinations:['classic','contract'],approvalMode:'webauthn',receive:{address,route:'contract',instructions:'Receive Testnet XLM through the native SAC.'}});
+    if(url.endsWith('/balance'))return response({network:'TESTNET',address,snapshot:{amountStroops:'100000000000',ledger:201}});
+    return original(url,init);
+  });
+  const onConnect=vi.fn(),user=userEvent.setup();render(<PaymentConnection onConnect={onConnect}/>);await signIn(user);
+  await screen.findByText(/Automatic Testnet deployment is processing/);expect(onConnect).not.toHaveBeenCalled();
+  confirmed=true;await user.click(screen.getByRole('button',{name:'Refresh deployment status'}));
+  await screen.findByText('Wallet connected.');await screen.findByText(/10,000 Testnet XLM allocated/);
+  expect(onConnect).toHaveBeenCalledTimes(1);expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address,canSign:true,supportedDestinations:['classic','contract']}));
+  expect(startAuthentication).toHaveBeenCalledTimes(1);expect(startRegistration).not.toHaveBeenCalled();
+});
+it('refuses payment activation if the verified C-address is absent from owned discovery',async()=>{
+  const {StrKey}=await import('@stellar/stellar-sdk'),address=StrKey.encodeContract(Buffer.alloc(32,1));
+  fixture(async()=>response({status:'CONFIRMED',network:'TESTNET',deploymentEnabled:true,spendingEnabled:true,walletId:address,recoveryReady:false,onChainSignerBound:true,address,transactionHash:'a'.repeat(64),confirmedLedger:200,primaryRuleId:0,primaryCredentialId:'primary'}));
+  const onConnect=vi.fn(),user=userEvent.setup();render(<PaymentConnection onConnect={onConnect}/>);await signIn(user);
+  await screen.findByRole('alert');expect(onConnect).not.toHaveBeenCalled();expect(screen.getByText(/1 passkey enrolled/)).toBeTruthy();
+});

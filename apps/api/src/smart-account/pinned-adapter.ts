@@ -22,6 +22,21 @@ export type ApprovedAccount = Readonly<{
   // Operator-supplied references to reviewed deployment and completed two-device recovery evidence.
   deploymentTransactionHash: string; recoveryTransactionHash: string;
 }>;
+/** Server-derived from a confirmed automatic deployment, never browser input. */
+export type PrimaryAccount = Omit<ApprovedAccount, 'backupRuleId'|'backupCredentialId'|'recoveryTransactionHash'> & { mode: 'primary-passkey' };
+type AccountApproval = ApprovedAccount | PrimaryAccount;
+export type PrimaryAccountResolver = (address: string) => Promise<PrimaryAccount | undefined>;
+function isPrimary(a: AccountApproval): a is PrimaryAccount { return 'mode' in a && a.mode === 'primary-passkey'; }
+function validateApproval(a: AccountApproval) {
+  requireThat(a.accountWasmHash===ACCOUNT_V080_HASH && StrKey.isValidContract(a.address) && StrKey.isValidContract(a.verifierAddress) &&
+    /^[a-f0-9]{64}$/.test(a.verifierWasmHash) && /^[a-f0-9]{64}$/.test(a.deploymentTransactionHash) &&
+    Number.isInteger(a.primaryRuleId) && a.primaryRuleId>=0 && a.primaryRuleId<=0xffffffff,'INVALID_APPROVED_ACCOUNT');
+  if (isPrimary(a)) {
+    requireThat(a.primaryRuleId===0 && !('backupRuleId' in a) && !('backupCredentialId' in a) && !('recoveryTransactionHash' in a),'INVALID_PRIMARY_ACCOUNT');
+  } else requireThat(/^[a-f0-9]{64}$/.test(a.recoveryTransactionHash) && a.deploymentTransactionHash!==a.recoveryTransactionHash &&
+    a.primaryCredentialId!==a.backupCredentialId && a.primaryRuleId!==a.backupRuleId &&
+    Number.isInteger(a.backupRuleId) && a.backupRuleId>=0 && a.backupRuleId<=0xffffffff,'INVALID_APPROVED_ACCOUNT');
+}
 type PublicCredential = { id: string; public_key: string };
 export type AccountRpc = Pick<rpc.Server,'getNetwork'|'getLedgerEntries'|'simulateTransaction'>;
 const sha = (s:string)=>createHash('sha256').update(s).digest('hex');
@@ -74,30 +89,36 @@ export function encodeAccountAssertion(entry:xdr.SorobanAuthorizationEntry,ruleI
   return signed.toXDR('base64');
 }
 
-/** Two permanent, separate Default rules: each has exactly one owned P-256 signer
- * and no policies. No delegation, threshold, session key or rule discovery fallback.
+/** One primary rule for automatic wallets, or two independently approved recovery rules.
+ * Exactly one owned P-256 signer per permanent Default rule, with no policies.
+ * The explicit server configuration selects the mode; there is no rule discovery fallback.
  */
 export class PinnedAccountAdapter implements PolicyReader, ContractPasskeyCodec {
-  private approved:ReadonlyMap<string,ApprovedAccount>;
-  constructor(private server:AccountRpc,accounts:readonly ApprovedAccount[],private credentials:(owner:string)=>Promise<PublicCredential[]>=getCredentials) {
-    requireThat(new Set(accounts.map(a=>a.address)).size===accounts.length,'DUPLICATE_APPROVED_ACCOUNT');
-    for(const a of accounts)requireThat(a.accountWasmHash===ACCOUNT_V080_HASH && StrKey.isValidContract(a.address) && StrKey.isValidContract(a.verifierAddress) && /^[a-f0-9]{64}$/.test(a.verifierWasmHash) && /^[a-f0-9]{64}$/.test(a.deploymentTransactionHash) && /^[a-f0-9]{64}$/.test(a.recoveryTransactionHash) && a.deploymentTransactionHash!==a.recoveryTransactionHash && a.primaryCredentialId!==a.backupCredentialId && a.primaryRuleId!==a.backupRuleId && [a.primaryRuleId,a.backupRuleId].every(id=>Number.isInteger(id)&&id>=0&&id<=0xffffffff),'INVALID_APPROVED_ACCOUNT');
-    this.approved=new Map(accounts.map(a=>[a.address,Object.freeze({...a})]));
+  private resolve:(address:string)=>Promise<AccountApproval|undefined>;
+  constructor(private server:AccountRpc,accounts:readonly ApprovedAccount[]|PrimaryAccountResolver,private credentials:(owner:string)=>Promise<PublicCredential[]>=getCredentials) {
+    if (typeof accounts==='function') this.resolve=accounts;
+    else {
+      requireThat(new Set(accounts.map(a=>a.address)).size===accounts.length,'DUPLICATE_APPROVED_ACCOUNT');
+      for(const a of accounts) validateApproval(a);
+      const approved=new Map(accounts.map(a=>[a.address,Object.freeze({...a})]));
+      this.resolve=async address=>approved.get(address);
+    }
   }
   private read(address:string) {return withConsistentSnapshot(()=>this.readSnapshot(address));}
   private async readSnapshot(address:string) {
-    const a=this.approved.get(address);requireThat(a,'UNAPPROVED_ACCOUNT');
+    const a=await this.resolve(address);requireThat(a && a.address===address,'UNAPPROVED_ACCOUNT');validateApproval(a);
     const [accountCode,verifierCode]=await Promise.all([verifyCurrentContractCode(this.server,address,a.accountWasmHash),verifyCurrentContractCode(this.server,a.verifierAddress,a.verifierWasmHash)]);
     const spec=new Client({contractId:address,networkPassphrase:PASSPHRASE,rpcUrl:'https://soroban-testnet.stellar.org'}).spec as unknown as RuleSpec;
     const read=simulationReader(this.server,address);
     const minLedger=Math.max(accountCode.ledger,verifierCode.ledger);
     const fresh:RawContractRead=async(fn,args)=>{const r=await read(fn,args);requireThat(r.ledger>=minLedger,'STALE_POLICY_READ');return r;};
-    const [countRead,primary,backup,owned]=await Promise.all([fresh('get_context_rules_count',[]),readHydratedContextRule(fresh,spec,a.primaryRuleId),readHydratedContextRule(fresh,spec,a.backupRuleId),this.credentials(a.owner)]);
+    const [countRead,primary,backup,owned]=await Promise.all([fresh('get_context_rules_count',[]),readHydratedContextRule(fresh,spec,a.primaryRuleId),
+      isPrimary(a)?undefined:readHydratedContextRule(fresh,spec,a.backupRuleId),this.credentials(a.owner)]);
     const count=spec.funcResToNative('get_context_rules_count',countRead.retval.toXDR('base64'));
     // Never combine code, rules and hydrated IDs observed at different ledger snapshots.
     const snapshot=primary.ledgers[0];
-    requireThat([accountCode.ledger,verifierCode.ledger,countRead.ledger,...primary.ledgers,...backup.ledgers].every(ledger=>ledger===snapshot),'INCONSISTENT_POLICY_SNAPSHOT');
-    requireThat(count===2,'UNEXPECTED_ACCOUNT_RULES');
+    requireThat([accountCode.ledger,verifierCode.ledger,countRead.ledger,...primary.ledgers,...(backup?.ledgers??[])].every(ledger=>ledger===snapshot),'INCONSISTENT_POLICY_SNAPSHOT');
+    requireThat(count===(isPrimary(a)?1:2),'UNEXPECTED_ACCOUNT_RULES');
     const check=(response:HydratedContextRule,id:number,credentialId:string)=>{
       const rule=response.rule;
       requireThat(rule.id===id && rule.context_type.tag==='Default' && rule.valid_until==null && rule.policies.length===0 && rule.policy_ids.length===0 && rule.signers.length===1 && rule.signer_ids.length===1,'UNSUPPORTED_ACCOUNT_POLICY');
@@ -106,16 +127,17 @@ export class PinnedAccountAdapter implements PolicyReader, ContractPasskeyCodec 
       requireThat(signer.tag==='External' && signer.values[0]===a.verifierAddress && Buffer.from(signer.values[1]).equals(expected),'ONCHAIN_SIGNER_KEY_MISMATCH');
       return {rule,credentialId,signer,key:expected.subarray(0,65)};
     };
-    const p=check(primary,a.primaryRuleId,a.primaryCredentialId),b=check(backup,a.backupRuleId,a.backupCredentialId);
-    requireThat(!p.key.equals(b.key),'BACKUP_KEY_MUST_BE_INDEPENDENT');
+    const p=check(primary,a.primaryRuleId,a.primaryCredentialId),b=!isPrimary(a)&&backup?check(backup,a.backupRuleId,a.backupCredentialId):undefined;
+    if(b) requireThat(!p.key.equals(b.key),'BACKUP_KEY_MUST_BE_INDEPENDENT');
     // Raw getter output is fingerprinted as returned. IDs resolved separately (older account
     // builds omit them from get_context_rule) are appended so signer re-registration is detected.
     const ids=(h:HydratedContextRule)=>h.hydrated.signerIds||h.hydrated.policyIds?[h.rule.signer_ids,h.rule.policy_ids]:[];
-    const hydratedIds=[...ids(primary),...ids(backup)];
-    const fingerprint=sha(JSON.stringify([PASSPHRASE,address,a.accountWasmHash,a.verifierAddress,a.verifierWasmHash,primary.raw,backup.raw,...(hydratedIds.length?[hydratedIds]:[])]));
+    const hydratedIds=[...ids(primary),...(backup?ids(backup):[])];
+    const fingerprint=sha(JSON.stringify([PASSPHRASE,address,a.accountWasmHash,a.verifierAddress,a.verifierWasmHash,primary.raw,
+      ...(backup?[backup.raw]:['primary-passkey']),...(hydratedIds.length?[hydratedIds]:[])]));
     return {approved:a,primary:p,backup:b,fingerprint,ledger:snapshot};
   }
-  async current(address:string) {const state=await this.read(address);return {fingerprint:state.fingerprint,recoveryReady:true};}
+  async current(address:string):ReturnType<PolicyReader['current']> {const state=await this.read(address);return {fingerprint:state.fingerprint,recoveryReady:!!state.backup,spendingReady:true};}
   private async context(wallet:Wallet,attempt:Attempt) {
     const state=await this.read(wallet.address);
     requireThat(state.approved.owner===wallet.owner && state.approved.walletId===wallet.id && attempt.walletId===wallet.id && attempt.from===wallet.address && state.fingerprint===wallet.policy && state.fingerprint===attempt.policy,'ACCOUNT_POLICY_BINDING_CHANGED');

@@ -3,7 +3,7 @@ import { verifyAuthenticationResponse } from '@simplewebauthn/server';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import type { Pool } from 'pg';
 import { db, withLockedAccount, credentialsLocked, updateCounterLocked } from '../store.js';
-import { requireThat, publicAttempt, type Attempt, type Wallet } from './model.js';
+import { requireThat, spendingReady, publicAttempt, type Attempt, type Wallet } from './model.js';
 import type { PaymentService } from './service.js';
 
 export type SigningPlan = { challenge: string; credentialIds: string[]; policy: string };
@@ -67,7 +67,7 @@ export class PasskeyApprovalService {
     requireThat(a.status==='awaiting_approval' && a.prepared && a.prepared.expiresAt>Date.now(),'ATTEMPT_NOT_AWAITING_APPROVAL');
     const wallet=await this.payments.store.wallet(walletId,owner);
     const current=await this.payments.policies.current(wallet.address);
-    requireThat(current.recoveryReady && current.fingerprint===a.policy,'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
+    requireThat(spendingReady(current) && current.fingerprint===a.policy,'SIGNER_POLICY_CHANGED_OR_RECOVERY_UNREADY');
     const plan=await this.codec.describe(wallet,a);
     requireThat(/^[A-Za-z0-9_-]{43}$/.test(plan.challenge) && Buffer.from(plan.challenge,'base64url').length===32 && plan.policy===a.policy && plan.credentialIds.length>0 && plan.credentialIds.length<=10 && new Set(plan.credentialIds).size===plan.credentialIds.length && plan.credentialIds.every(id=>/^[A-Za-z0-9_-]{1,1024}$/.test(id)),'INVALID_CONTRACT_SIGNING_PLAN');
     return {a,wallet,plan};
