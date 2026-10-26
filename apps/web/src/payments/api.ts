@@ -1,6 +1,6 @@
 import { startAuthentication } from '@simplewebauthn/browser';
 import { invoiceAdapter } from '../invoices/api';
-import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput } from './model';
+import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput, type ResolvedRecipient } from './model';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string) {
@@ -145,6 +145,18 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       });
       return { items, nextCursor: cursor(data.nextCursor) };
     },
+  };
+  adapter.resolveRecipientEmail = async (email: string): Promise<ResolvedRecipient> => {
+    const normalized = email.trim().toLowerCase();
+    if (!/^[^\\s@]{1,64}@[^\\s@]+\\.[^\\s@]+$/.test(normalized) || normalized.length > 254) throw Error('Enter a valid recipient email.');
+    const value = object(await api('recipients/resolve?email=' + encodeURIComponent(normalized)));
+    if (value.network !== NETWORK || value.email !== normalized || value.mailboxVerified !== true ||
+        value.walletBindingVerified !== true || value.legalIdentityVerified !== false ||
+        typeof value.address !== 'string' || addressKind(value.address) !== 'contract' ||
+        value.address === address || !supportedDestinations.includes('contract'))
+      throw Error('Recipient email is not linked to a supported verified Testnet wallet.');
+    return { network: NETWORK, email: normalized, address: value.address,
+      mailboxVerified: true, walletBindingVerified: true, legalIdentityVerified: false };
   };
   adapter.invoices=invoiceAdapter(api,walletId,address);
   const runReference = (value: unknown) => { const s = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(s)) throw Error('Invalid pay run reference.'); return s; };
