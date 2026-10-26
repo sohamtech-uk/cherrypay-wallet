@@ -84,7 +84,7 @@ const deployment = {
   }
 };
 const integrations = {
-  '/api/v1/market/xlm': {get:read('Read informational XLM/USD market history','Optional CoinGecko reference with five-minute caching. Returns 503 when unavailable or stale. Testnet balances have no fiat value; market data is never spending authority.',false,[{name:'days',in:'query',schema:{type:'string',enum:['1','7','30','90','365'],default:'1'}}])},
+  '/api/v1/market/xlm': {get:read('Read informational XLM/USD market history','Public CoinGecko market data with an optional server-side Demo key and five-minute caching. Returns 503 when unavailable or stale. Testnet balances have no fiat value; market data is never spending authority.',false,[{name:'days',in:'query',schema:{type:'string',enum:['1','7','30','90','365'],default:'1'}}])},
   '/api/v1/aurora/capabilities': { get: read('Check optional Aurora route availability', 'Aurora Base USDC to Stellar USDC is MAINNET-only when configured; it never funds the Stellar Testnet wallet.') },
   '/api/v1/aurora/quotes': {
     post: mutation('Request conditional Aurora MAINNET quote', 'Available only when a separate MAINNET integration is deliberately enabled. Requires real Base funds and is NOT a Testnet XLM wallet API.', envelope({ recipient: text, refundTo: text, amount: text }, ['recipient','refundTo','amount']))
