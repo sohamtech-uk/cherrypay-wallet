@@ -37,7 +37,7 @@ export function Profile() {
     </section>
     <section className="card payment-screen" aria-label="Wallet details">
       <div className="profile-section-heading"><h2><Wallet size={20}/> Wallet details</h2><span className="wallet-pill">Stellar Testnet</span></div>
-      <dl className="profile-detail-grid"><dt>Connection</dt><dd>{account.connected ? 'Connected' : 'Not ready'}</dd><dt>Wallet status</dt><dd>{account.deployment?.spendingEnabled ? 'On-chain signer verified' : account.deploymentStatus || 'Awaiting verification'}</dd><dt>Transaction approval</dt><dd>{account.connected && account.canSign ? 'Primary passkey available' : 'Not available'}</dd></dl>
+      <dl className="profile-detail-grid"><dt>Connection</dt><dd>{account.connected ? 'Connected' : 'Not ready'}</dd><dt>Wallet status</dt><dd>{account.deployment?.spendingEnabled ? 'On-chain signer verified' : account.connected ? 'Connected; signer status not verified here' : account.deploymentStatus || 'Awaiting verification'}</dd><dt>Transaction approval</dt><dd>{account.connected && account.canSign ? 'Approval mode available (requires fresh passkey)' : 'Not available'}</dd></dl>
       {address ? <>
         <label htmlFor="profile-wallet-address">Wallet address</label>
         <div className="wallet-address-row"><input id="profile-wallet-address" className="mono" readOnly value={showAddress ? address : address.slice(0,5)+'••••••••'+address.slice(-5)} aria-label="Wallet address"/>
