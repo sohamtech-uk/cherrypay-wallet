@@ -25,6 +25,9 @@ describe('application payment composition', () => {
       expect(result.headers['cache-control']).toBe('no-store');
       const doc = result.json();
       expect(doc.openapi).toBe('3.1.0');
+      expect(doc.paths['/api/v1/openapi.json'].get.security).toEqual([]);
+      expect(doc.paths['/health'].get.security).toEqual([]);
+      expect(doc.paths['/ready'].get.security).toEqual([]);
       expect(doc.servers).toEqual([{ url: '/', description: expect.any(String) }]);
       expect(doc.paths['/api/v1/passkeys/onboarding/options'].post.security).toEqual([]);
       expect(doc.paths['/api/v1/wallet/me'].get.security).toEqual([{ WalletSession: [] }]);
