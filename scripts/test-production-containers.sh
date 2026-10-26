@@ -17,6 +17,8 @@ for attempt in {1..60}; do
   if [[ "$attempt" == 60 ]]; then echo 'Production container startup failed'; docker logs "$test_name-api"; exit 1; fi
   sleep 2
 done
+node --test scripts/check-judge-readiness.test.mjs
+node scripts/check-judge-readiness.mjs http://localhost:8080
 node --input-type=module <<'JS'
 import assert from 'node:assert/strict';
 const root='http://localhost:8080';

@@ -94,6 +94,7 @@ it('cancels the persisted preview before editing and only then clears the recove
   await user.click(screen.getByRole('button', { name: 'Edit payment' }));
   await screen.findByRole('button', { name: 'Preview payment' });
   expect(adapter.cancelAttempt).toHaveBeenCalledWith('q'); expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeNull();
+  expect(document.activeElement).toBe(screen.getByLabelText('Recipient address'));
 });
 
 it('resets a missing or unsigned payment only after server confirmation and enables a new recipient',async()=>{

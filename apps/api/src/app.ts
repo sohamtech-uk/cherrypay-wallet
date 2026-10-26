@@ -56,7 +56,7 @@ app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(tok
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 await registerAccessHistory(app,{pool:db,authenticate:sessionAccount,hash:hashToken,mapsBrowserKey:config.mapsBrowserKey});
 await registerMarket(app,config.marketDemoKey);
-await registerSmartAccountRoutes(app,{deployments:options.deployments,origin:config.origin});
+await registerSmartAccountRoutes(app,{deployments:options.deployments,paymentsEnabled:!!options.payments,origin:config.origin});
 await registerIntegrationRoutes(app, config.integrations);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 const paymentDependencies: PaymentDependencies | undefined = options.payments ? {

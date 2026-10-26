@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Asset, Networks, StrKey } from '@stellar/stellar-sdk';
 import { PaymentContext } from '../payments/context';
 import { Send } from '../payments/Send';
-import { checkQuote, type Invoice, type InvoiceDetail, type PaymentAdapter } from '../payments/model';
+import { checkQuote, type Attempt, type Invoice, type InvoiceDetail, type PaymentAdapter } from '../payments/model';
 import { Invoices } from './Invoices';
 import { InvoiceCheckout } from './Checkout';
 import { invoiceAdapter, parseInvoice } from './api';
@@ -24,6 +24,57 @@ beforeEach(()=>localStorage.clear());
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe('invoice checkout',()=>{
+  it('supports keyboard-only review and approval, then exposes a receipt only after verified confirmation',async()=>{
+    const service=adapter(),user=userEvent.setup(),hash='b'.repeat(64);
+    const attempt:Attempt={id:'quote',network:'TESTNET',from:address,destination,amountStroops:'10000000',paymentRequestId:request.id,feeStroops:'100',createdAt:new Date().toISOString(),status:'awaiting_approval',verified:false};
+    vi.mocked(service.createAttempt).mockResolvedValue(attempt);
+    vi.mocked(service.approve).mockResolvedValue({...attempt,status:'pending',transactionHash:hash});
+    mount(<Send request={request}/>,service);
+    // The public invoice includes one navigation link, then the two read-only fields.
+    await user.tab(); await user.tab(); await user.tab(); await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button',{name:'Preview payment'}));
+    await user.keyboard('{Enter}');
+    await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('heading',{name:'Review and approve'})));
+    expect(screen.getByText('0.0000100 XLM · paid by sponsor')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'Approve exact payment'})).toHaveProperty('disabled',true);
+    expect(service.approve).not.toHaveBeenCalled();
+    await user.tab();expect(document.activeElement).toBe(screen.getByRole('checkbox'));
+    await user.keyboard(' ');await user.tab();await user.keyboard('{Enter}');
+    await screen.findByText('Pending confirmation');
+    expect(service.approve).toHaveBeenCalledTimes(1);
+    expect(service.createAttempt).toHaveBeenCalledWith(expect.objectContaining({paymentRequestId:request.id,amountStroops:'10000000'}),expect.any(String));
+    expect(screen.queryByRole('link',{name:'Verified Testnet receipt'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Start a new payment'})).toBeNull();
+    vi.mocked(service.getAttemptByKey).mockResolvedValue({...attempt,status:'confirmed',verified:true,transactionHash:hash});
+    expect(document.activeElement).toBe(screen.getByRole('heading',{name:'Payment status'}));
+    await user.tab();await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button',{name:'Check existing attempt'}));
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('link',{name:'Verified Testnet receipt'})).toHaveProperty('href',`https://stellar.expert/explorer/testnet/tx/${hash}`);
+    await screen.findByRole('button',{name:'Start a new payment'});
+    expect(service.prepare).toHaveBeenCalledTimes(1);expect(service.approve).toHaveBeenCalledTimes(1);
+  });
+  it('focuses an interrupted-approval error and keeps the same invoice attempt after reload',async()=>{
+    const service=adapter(),user=userEvent.setup();
+    const attempt:Attempt={id:'quote',network:'TESTNET',from:address,destination,amountStroops:'10000000',paymentRequestId:request.id,feeStroops:'100',createdAt:new Date().toISOString(),status:'awaiting_approval',verified:false};
+    vi.mocked(service.createAttempt).mockResolvedValue(attempt);
+    vi.mocked(service.approve).mockRejectedValue(Error('Connection interrupted. Check the existing payment.'));
+    const view=mount(<Send request={request}/>,service);
+    await user.click(screen.getByRole('button',{name:'Preview payment'}));
+    await user.click(await screen.findByRole('checkbox'));
+    await user.click(screen.getByRole('button',{name:'Approve exact payment'}));
+    await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('alert')));
+    expect(screen.getByRole('alert').textContent).toContain('Connection interrupted');
+    const storageKey=`cherrypay:pending:TESTNET:${address}`,saved=localStorage.getItem(storageKey);
+    expect(saved).toBeTruthy();view.unmount();
+    vi.mocked(service.getAttemptByKey).mockResolvedValue({...attempt,status:'unknown'});
+    mount(<Send request={request}/>,service);
+    await screen.findByText('Outcome unknown — check status before retrying');
+    expect(screen.queryByRole('button',{name:'Preview payment'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Start a new payment'})).toBeNull();
+    expect(localStorage.getItem(storageKey)).toBe(saved);
+    expect(service.prepare).toHaveBeenCalledTimes(1);expect(service.approve).toHaveBeenCalledTimes(1);
+  });
   it('locks the destination and exact amount, persists recovery and includes the request in preparation',async()=>{
     const service=adapter();mount(<Send request={request}/>,service);
     expect(screen.getByLabelText('Recipient address')).toHaveProperty('readOnly',true);
