@@ -146,6 +146,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       if (await adoptSession(session, owner, id)) {
         if (additional) setNotice('Additional passkey enrolled for sign-in. This does not change your wallet’s on-chain signers or verify recovery.');
         await loadWallets(id);
+
       }
     } catch (e) {
       if (additional && !verifying && active(id)) setError(e instanceof Error ? e.message : 'Passkey enrollment cancelled. Try again when ready.');
