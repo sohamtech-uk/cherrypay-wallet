@@ -43,7 +43,9 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
   }, [quote, key, error, recipientMode]);
   const [accepted, setAccepted] = useState(false);
   useEffect(()=>{if(request&&!quote&&!key){setDestination(request.destination);setAmount(xlm(request.remainingStroops));}},[request,quote,key]);
-  const requestClosed=!!request&&(request.expired||request.expiresAt<=Date.now()||request.remainingStroops==='0'||checkoutUnavailable);
+  // Legacy partially-paid invoices are also closed to further charges. A new
+  // exact invoice is required for an additional payment, not a reused QR.
+  const requestClosed=!!request&&(request.status!=='unpaid'||request.paidStroops!=='0'||request.expired||request.expiresAt<=Date.now()||request.remainingStroops==='0'||checkoutUnavailable);
   const destinationFeedback = recipientMode === 'address' && destination ? destinationError(destination.trim(), adapter.supportedDestinations) : '';
   const intent = (resolvedAddress?: string) => {
     const recipient = (resolvedAddress ?? destination).trim();
