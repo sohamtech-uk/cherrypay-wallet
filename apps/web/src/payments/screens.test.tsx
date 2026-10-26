@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { StrKey } from '@stellar/stellar-sdk';
 import { PaymentContext } from './context';
 import { Send } from './Send';
@@ -108,4 +108,38 @@ it('keeps the recovery key if a submitted payment or unavailable server prevents
  adapter.resetAttempt=vi.fn(async()=>{throw Error('Payment may already be submitted.');});localStorage.setItem(storageKey,key);mount(<Send/>,adapter);
  await userEvent.click(screen.getByRole('button',{name:'Reset and change recipient'}));await screen.findByText('Payment may already be submitted.');
  expect(localStorage.getItem(storageKey)).toBe(key);expect(screen.queryByLabelText('Recipient address')).toBeNull();expect(adapter.createAttempt).not.toHaveBeenCalled();
+});
+
+
+it('automatically refreshes a saved unresolved payment every five seconds without reapproving', async () => {
+  const adapter = service(), key = 'auto-refresh-saved-key';
+  const storageKey = `cherrypay:pending:TESTNET:${address}`;
+  localStorage.setItem(storageKey, key);
+  vi.mocked(adapter.getAttemptByKey).mockResolvedValue({ ...attempt, status: 'unknown', transactionHash: '3'.repeat(64) });
+  const interval = vi.spyOn(window, 'setInterval');
+  mount(<Send/>, adapter);
+  await waitFor(() => expect(adapter.getAttemptByKey).toHaveBeenCalledWith(key));
+  expect(interval).toHaveBeenCalledWith(expect.any(Function), 5000);
+  expect(await screen.findByText('Outcome unknown — check status before retrying')).toBeTruthy();
+  expect(screen.getByText(/Status refreshes automatically every 5 seconds/)).toBeTruthy();
+  expect(adapter.createAttempt).not.toHaveBeenCalled();
+  expect(adapter.approve).not.toHaveBeenCalled();
+  interval.mockRestore();
+});
+
+it('polls unresolved transaction detail every five seconds until a terminal result', async () => {
+  const adapter = service();
+  vi.mocked(adapter.getAttempt)
+    .mockResolvedValueOnce({ ...attempt, status: 'unknown', transactionHash: '3'.repeat(64) })
+    .mockResolvedValueOnce({ ...attempt, status: 'confirmed', verified: true, transactionHash: '3'.repeat(64) });
+  const interval = vi.spyOn(window, 'setInterval');
+  render(<MemoryRouter initialEntries={['/history/attempt-1']}><PaymentContext.Provider value={adapter}><Routes><Route path="/history/:attemptId" element={<History/>}/></Routes></PaymentContext.Provider></MemoryRouter>);
+  expect(await screen.findByText('Outcome unknown — check status before retrying')).toBeTruthy();
+  await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 5000));
+  const poll = interval.mock.calls.find(call => call[1] === 5000)?.[0] as TimerHandler;
+  expect(typeof poll).toBe('function');
+  await (poll as () => void)();
+  await waitFor(() => expect(screen.getByText('Confirmed and verified')).toBeTruthy());
+  expect(adapter.getAttempt).toHaveBeenCalledTimes(2);
+  interval.mockRestore();
 });
