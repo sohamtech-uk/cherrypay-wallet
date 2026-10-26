@@ -3,13 +3,15 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
 import { parseDeployment, type DeploymentView } from './deployment';
 import type { PaymentAdapter } from './model';
+import { WalletAccountContext } from './account-context';
+import { Link } from 'react-router-dom';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
 /** Only the public account ID is remembered. Session authority stays in memory. */
-export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: PaymentAdapter | null): void; signer?: TransferSigner }) {
+export function PaymentConnection({ onConnect, signer, showSetup = true, showAccountActions = true, children }: { onConnect(adapter: PaymentAdapter | null): void; signer?: TransferSigner; showSetup?: boolean; showAccountActions?: boolean; children?: React.ReactNode }) {
   const token = useRef<string | undefined>(undefined);
   const deadline = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -215,12 +217,14 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     try { await navigator.clipboard.writeText(accountId); setNotice('Account ID copied. Keep it for sign-in; it cannot replace a passkey.'); }
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
-  return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
+  return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
+    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
+    {showSetup && <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
     <h2>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h2>
     <p>{authenticated ? 'Your account is signed in. Check wallet deployment and funding below before sending or receiving.' : 'Get started with your email and device passkey. New accounts require a verified wallet deployment before payments are available.'}</p>
     {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
-      <label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
-      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p>
+      {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
+      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your email is authenticated. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
         {deployment?.address ? <>
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>
@@ -241,8 +245,8 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
       <h3>Security and recovery</h3><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p>
-      <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
-      <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button>
+      {showAccountActions && <><button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
+      <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button></>}
     </> : <>
       <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
         <label htmlFor="account-id">Email address (Account ID)</label>
@@ -251,8 +255,10 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       </fieldset></form>
       <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
     </>}
-    {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
+    {showAccountActions && accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert" className="error">{error}</p>}
-  </section>;
+  </section>}
+    {children}
+  </WalletAccountContext.Provider>;
 }
