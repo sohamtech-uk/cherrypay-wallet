@@ -80,6 +80,7 @@ export function assertDeploymentEnvelope(tx: Transaction, d: DeploymentDescripto
   const expected = deploymentFunction(d);
   requireThat(operation.hostFunction().toXDR('base64') === expected.toXDR('base64'), 'DEPLOYMENT_CONSTRUCTOR_CHANGED');
   // Only native transaction-source authorization may accompany this deployment.
+  requireThat(operation.auth().length === 1, 'DEPLOYMENT_AUTHORIZATION_REQUIRED');
   for (const auth of operation.auth()) {
     requireThat(auth.credentials().switch().name === 'sorobanCredentialsSourceAccount' &&
       auth.rootInvocation().subInvocations().length === 0 &&
@@ -112,8 +113,18 @@ export class StellarDeploymentChain implements DeploymentChain {
     requireThat(d.deployerPublicKey === this.publicKey, 'DEPLOYER_IDENTITY_CHANGED');
     await this.preflight();
     const source = await this.server.getAccount(this.publicKey);
+    const func = deploymentFunction(d);
+    // Enforced simulation requires explicit authorization even when the creator
+    // is the transaction source. Bind it to this exact constructor and no calls.
+    const auth = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeCreateContractV2HostFn(func.createContractV2()),
+        subInvocations: [],
+      }),
+    });
     const tx = new TransactionBuilder(source, { fee: '100', networkPassphrase: TESTNET_PASSPHRASE })
-      .addOperation(Operation.invokeHostFunction({ func: deploymentFunction(d), auth: [] })).setTimeout(180).build();
+      .addOperation(Operation.invokeHostFunction({ func, auth: [auth] })).setTimeout(180).build();
     const simulation = await this.server.simulateTransaction(tx, undefined, 'enforce');
     requireThat(rpc.Api.isSimulationSuccess(simulation) && !rpc.Api.isSimulationRestore(simulation) && simulation.result, 'DEPLOYMENT_SIMULATION_FAILED');
     const assembled = rpc.assembleTransaction(tx, simulation).build();

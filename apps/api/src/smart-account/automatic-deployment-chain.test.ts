@@ -54,11 +54,34 @@ describe('real XDR deployment construction with synthetic keys', () => {
     expect(f.deployer.verify(tx.hash(), tx.signatures[0].signature())).toBe(true);
     expect(tx.hash().toString('hex')).toBe(result.transactionHash);
     expect(f.server.simulateTransaction).toHaveBeenCalledWith(expect.any(Transaction),undefined,'enforce');
+    const simulated = f.server.simulateTransaction.mock.calls[0][0];
+    const operation = simulated.toEnvelope().v1().tx().operations()[0].body().invokeHostFunctionOp();
+    expect(operation.auth()).toHaveLength(1);
+    expect(operation.auth()[0].credentials().switch().name).toBe('sorobanCredentialsSourceAccount');
+    expect(operation.auth()[0].rootInvocation().subInvocations()).toEqual([]);
+    expect(operation.auth()[0].rootInvocation().function().createContractV2HostFn().toXDR('base64'))
+      .toBe(operation.hostFunction().createContractV2().toXDR('base64'));
     expect(f.server.sendTransaction).not.toHaveBeenCalled();
     assertDeploymentEnvelope(tx, f.descriptor);
     const envelope = tx.toEnvelope();
     envelope.v1().tx().operations()[0].body().invokeHostFunctionOp().hostFunction().createContractV2().constructorArgs([xdr.ScVal.scvVec([]),xdr.ScVal.scvMap([])]);
     expect(() => assertDeploymentEnvelope(new Transaction(envelope, TESTNET_PASSPHRASE), f.descriptor)).toThrow('CONSTRUCTOR_CHANGED');
+  });
+  it('rejects missing, duplicate or expanded deployment authorization before submission', async () => {
+    const f = fixture(); vi.spyOn(f.chain, 'preflight').mockResolvedValue();
+    const prepared = await f.chain.prepare(f.descriptor);
+    const tx = new Transaction(prepared.signedXdr, TESTNET_PASSPHRASE);
+    for (const mode of ['missing', 'duplicate', 'nested', 'different-constructor']) {
+      const envelope = tx.toEnvelope();
+      const op = envelope.v1().tx().operations()[0].body().invokeHostFunctionOp();
+      const auth = op.auth()[0];
+      if (mode === 'missing') op.auth([]);
+      if (mode === 'duplicate') op.auth([auth, auth]);
+      if (mode === 'nested') auth.rootInvocation().subInvocations([xdr.SorobanAuthorizedInvocation.fromXDR(auth.rootInvocation().toXDR())]);
+      if (mode === 'different-constructor') auth.rootInvocation().function().createContractV2HostFn().constructorArgs([]);
+      expect(() => assertDeploymentEnvelope(new Transaction(envelope, TESTNET_PASSPHRASE), f.descriptor)).toThrow('DEPLOYMENT_AUTHORIZATION');
+    }
+    expect(f.server.sendTransaction).not.toHaveBeenCalled();
   });
   it('refuses mainnet, missing uploaded code and fees above the configured ceiling', async () => {
     const f = fixture(); f.server.getNetwork.mockResolvedValueOnce({passphrase:'Public Global Stellar Network ; September 2015'});
