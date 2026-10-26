@@ -1,6 +1,12 @@
 import type { WalletBackendClient } from './indexing/wallet-backend.js';
 import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 import { registerPayrollRoutes } from './payroll/routes.js';
+import { registerInvoiceRoutes } from './invoices/routes.js';
+import { registerRecipientDirectoryRoutes } from './recipients/routes.js';
+import { walletOpenApi } from './developers/openapi.js';
+import { InvoiceWebhookWorker } from './invoices/webhook.js';
+import { registerAccessHistory } from './access-history.js';
+import { registerMarket } from './market.js';
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import { registerIntegrationRoutes } from './integrations/routes.js';
 import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
@@ -21,6 +27,8 @@ function limited(ip:string,route:string){const key=ip+':'+route,now=Date.now(),o
 app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==config.origin)return reply.code(403).send({error:'Untrusted origin'});if(req.method==='POST'&&req.url.startsWith('/api/v1/passkeys/')&&limited(req.ip,req.url))return reply.code(429).send({error:'Too many attempts'});});
 app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments,walletPaymentsEnabled:!!options.payments}));
 app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
+// Public, read-only API reference. No runtime keys, sessions or account data.
+app.get('/api/v1/openapi.json', { schema: { querystring: { type: 'object', additionalProperties: false } } }, async () => walletOpenApi);
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:!!options.deployments}));
 app.post('/api/v1/passkeys/onboarding/options', {schema:{body:{type:'object',required:['email'],additionalProperties:false,properties:{email:{type:'string',minLength:3,maxLength:254}}}}}, async(req,reply)=>{
  try{return await beginEmailOnboarding(config.rpID,(req.body as {email:string}).email);}
@@ -31,7 +39,7 @@ app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{
   try {
     const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishRegistration>[2]},t=token(req.headers.authorization);
     if(t&&await sessionAccount(t)!==accountID)return reply.code(403).send({error:'Authentication required'});
-    const verified=await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t);
+    const verified=await finishRegistration(accountID,requestID,response,config.rpID,config.origin,t,{ip:req.ip,userAgent:req.headers['user-agent']});
     try {
       if (options.deployments) await options.deployments.queue(verified.accountID);
       else await db.query(`INSERT INTO wallet_deployment_jobs(account_id,status) VALUES($1,$2)
@@ -44,11 +52,14 @@ app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{
   } catch {return reply.code(400).send({error:'Cannot verify enrollment'});}
 });
 app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{const value=(req.body as {accountID?:string;email?:string});const account=value.email?await getAccountByEmail(value.email):undefined;return await beginAuthentication(account?.id??value.accountID??'',config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
-app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin);}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
-app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);const identity=await emailForAccount(id);return {accountID:id,email:identity?.email??null,emailVerified:!!identity?.email_verified_at,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:!!options.deployments};});
+app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin,{ip:req.ip,userAgent:req.headers['user-agent']});}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
+app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);const identity=await emailForAccount(id);return {accountID:id,email:identity?.email??null,emailVerified:!!identity?.email_verified_at,emailPaymentsEnabled:!!identity?.email_payments_enabled,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:!!options.deployments};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
-await registerSmartAccountRoutes(app,{deployments:options.deployments,origin:config.origin});
+await registerAccessHistory(app,{pool:db,authenticate:sessionAccount,hash:hashToken,mapsBrowserKey:config.mapsBrowserKey});
+await registerMarket(app,config.marketDemoKey);
+await registerSmartAccountRoutes(app,{deployments:options.deployments,paymentsEnabled:!!options.payments,origin:config.origin});
 await registerIntegrationRoutes(app, config.integrations);
+await registerRecipientDirectoryRoutes(app);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 const paymentDependencies: PaymentDependencies | undefined = options.payments ? {
   service: options.payments,
@@ -64,6 +75,15 @@ const paymentDependencies: PaymentDependencies | undefined = options.payments ? 
 } : undefined;
 await registerPaymentRoutes(app, paymentDependencies);
 await registerPayrollRoutes(app, paymentDependencies);
+const invoices=await registerInvoiceRoutes(app,paymentDependencies);
+if(invoices) {
+  let stopInvoices:(()=>Promise<void>)|undefined;
+  const webhook=config.invoiceWebhook?new InvoiceWebhookWorker(invoices.pool,config.invoiceWebhook):undefined;
+  app.addHook('onReady',async()=>{
+    stopInvoices=startPaymentWorker({tick:async()=>{await invoices.tick();await webhook?.tick();}},()=>app.log.warn({code:'INVOICE_RECONCILIATION_RETRY_REQUIRED'},'Invoice worker will retry'));
+  });
+  app.addHook('onClose',async()=>{await stopInvoices?.();});
+}
 if (options.payments) {
   let stop: (() => Promise<void>) | undefined;
   app.addHook('onReady', async () => {

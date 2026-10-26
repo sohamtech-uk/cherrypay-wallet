@@ -6,6 +6,7 @@ import { getConfig } from './config.js';
 import { PaymentService } from './payments/service.js';
 import { MemoryRepository } from './payments/test-support/memory-repository.js';
 import { intent, mockChain, mockPolicy, wallet } from './payments/test-fixtures.js';
+import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 const config = getConfig({ WALLET_ORIGIN: 'https://wallet.example' });
 const path = '/api/v1/wallets/wallet-1/attempts';
 const headers = { origin: config.origin, authorization: 'Bearer verified-session', 'idempotency-key': 'idempotency-key-0001' };
@@ -17,6 +18,49 @@ function payments() {
   return service;
 }
 describe('application payment composition', () => {
+  it.each([[false, false], [true, false], [false, true], [true, true]])('reports deployment=%s and payment runtime=%s consistently without claiming recovery', async (deploymentEnabled, paymentEnabled) => {
+    const deployments = deploymentEnabled ? { start: () => async () => {} } as AutomaticDeploymentService : undefined;
+    const app = await buildApp({ config, deployments, payments: paymentEnabled ? payments() : undefined, logger: false });
+    try {
+      const health = (await app.inject('/health')).json();
+      const response = await app.inject('/api/v1/smart-account/capabilities');
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toMatchObject({
+        capabilityScope: 'runtime', walletVerificationRequired: true,
+        deploymentEnabled: health.walletDeploymentEnabled,
+        spendingEnabled: health.walletPaymentsEnabled, recoveryEnabled: false,
+      });
+      expect(response.json().spendingEnabled).toBe(paymentEnabled);
+      expect(identity.sessionAccount).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+  it('publishes a safe, anonymous, current OpenAPI contract covering identity, wallet, invoice and payment APIs', async () => {
+    const app = await buildApp({ config, logger: false });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/api/v1/openapi.json' });
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['cache-control']).toBe('no-store');
+      const doc = result.json();
+      expect(doc.openapi).toBe('3.1.0');
+      expect(doc.paths['/api/v1/openapi.json'].get.security).toEqual([]);
+      expect(doc.paths['/health'].get.security).toEqual([]);
+      expect(doc.paths['/ready'].get.security).toEqual([]);
+      expect(doc.servers).toEqual([{ url: '/', description: expect.any(String) }]);
+      expect(doc.paths['/api/v1/passkeys/onboarding/options'].post.security).toEqual([]);
+      expect(doc.paths['/api/v1/wallet/me'].get.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/smart-account/deployment'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/verify'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/wallets/{walletId}/invoices'].post.security).toEqual([{ WalletSession: [] }]);
+      expect(doc.paths['/api/v1/payment-requests/{requestId}'].get.security).toEqual([]);
+      expect(doc.paths['/api/v1/aurora/capabilities'].get.description).toMatch(/MAINNET/);
+      expect(doc.paths['/api/v1/intelligence/recipient'].get.description).toMatch(/NOT supported/);
+      expect(result.body).not.toContain('AZURE_MAIL_CLIENT_SECRET');
+      expect(result.body).not.toContain('STELLAR_RELAYER_SECRET');
+      expect(identity.sessionAccount).not.toHaveBeenCalled();
+      expect((await app.inject({ url: '/api/v1/openapi.json?unexpected=1' })).statusCode).toBe(400);
+    } finally { await app.close(); }
+  });
   it('keeps external integrations gated and enforces origin on quote creation', async () => {
     const app = await buildApp({ config, logger: false });
     try {

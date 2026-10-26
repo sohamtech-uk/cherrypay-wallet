@@ -17,11 +17,23 @@ for attempt in {1..60}; do
   if [[ "$attempt" == 60 ]]; then echo 'Production container startup failed'; docker logs "$test_name-api"; exit 1; fi
   sleep 2
 done
+node --test scripts/check-judge-readiness.test.mjs
+node scripts/check-judge-readiness.mjs http://localhost:8080
 node --input-type=module <<'JS'
 import assert from 'node:assert/strict';
 const root='http://localhost:8080';
 const network=await fetch(root+'/api/v1/network');
 assert.equal(network.status,200); assert.equal((await network.json()).network,'TESTNET');
+const specification=await fetch(root+'/api/v1/openapi.json');
+assert.equal(specification.status,200);
+assert.equal(specification.headers.get('cache-control'),'no-store');
+const reference=await specification.json();
+assert.equal(reference.openapi,'3.1.0');
+assert.ok(reference.paths['/api/v1/wallets/{walletId}/invoices'].post);
+assert.ok(reference.paths['/api/v1/passkeys/onboarding/options'].post);
+assert.ok(reference.paths['/api/v1/wallets/{walletId}/attempts/{attemptId}/approval/verify'].post);
+const docsPage=await fetch(root+'/developers');
+assert.equal(docsPage.status,200); assert.match(await docsPage.text(),/<div id="root">/);
 const page=await fetch(root+'/activity');
 assert.equal(page.status,200); assert.match(await page.text(),/<div id="root">/);
 assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
@@ -34,7 +46,7 @@ const enroll=async ip=>fetch(root+'/api/v1/passkeys/registration/options',{metho
 for(let i=0;i<10;i++) assert.equal((await enroll('192.0.2.1')).status,200);
 assert.equal((await enroll('192.0.2.1')).status,429);
 assert.equal((await enroll('192.0.2.2')).status,200);
-console.log('Compiled API, migrations, SPA, same-origin API, disabled payments, origin and proxy rate limits passed');
+console.log('Compiled API, migrations, developer portal, OpenAPI, SPA, disabled payments, origin and proxy rate limits passed');
 JS
 docker stop "$test_name-pg" >/dev/null
 status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ready)

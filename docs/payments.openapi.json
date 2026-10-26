@@ -67,6 +67,270 @@
           }
         }
       },
+      "InvoiceInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network",
+          "invoiceReference",
+          "merchantName",
+          "amountStroops",
+          "expiresAt"
+        ],
+        "properties": {
+          "network": {
+            "type": "string",
+            "const": "TESTNET"
+          },
+          "invoiceReference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,63}$"
+          },
+          "merchantName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "amountStroops": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "Invoice": {
+        "type": "object",
+        "required": [
+          "id",
+          "network",
+          "asset",
+          "assetContract",
+          "invoiceReference",
+          "merchantName",
+          "destination",
+          "amountStroops",
+          "paidStroops",
+          "remainingStroops",
+          "status",
+          "expiresAt",
+          "expired",
+          "paymentPending",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "network": {
+            "const": "TESTNET"
+          },
+          "asset": {
+            "const": "XLM"
+          },
+          "assetContract": {
+            "type": "string"
+          },
+          "invoiceReference": {
+            "type": "string"
+          },
+          "merchantName": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "amountStroops": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "paidStroops": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "remainingStroops": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "status": {
+            "enum": [
+              "unpaid",
+              "partially_paid",
+              "paid",
+              "overpaid"
+            ]
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "paymentPending": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "integer"
+          }
+        }
+      },
+      "InvoiceDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Invoice"
+          },
+          {
+            "type": "object",
+            "required": [
+              "walletId",
+              "receipts",
+              "receiptsTruncated"
+            ],
+            "properties": {
+              "walletId": {
+                "type": "string"
+              },
+              "receiptsTruncated": {
+                "type": "boolean"
+              },
+              "receipts": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "eventId",
+                    "transactionHash",
+                    "from",
+                    "amountStroops",
+                    "ledger",
+                    "closedAt",
+                    "method",
+                    "actor",
+                    "note",
+                    "allocatedAt",
+                    "late"
+                  ],
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "transactionHash": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "amountStroops": {
+                      "type": "string",
+                      "pattern": "^[0-9]+$"
+                    },
+                    "ledger": {
+                      "type": "integer"
+                    },
+                    "closedAt": {
+                      "type": "integer"
+                    },
+                    "method": {
+                      "enum": [
+                        "checkout",
+                        "manual"
+                      ]
+                    },
+                    "actor": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "allocatedAt": {
+                      "type": "integer"
+                    },
+                    "late": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "InvoicePage": {
+        "type": "object",
+        "required": [
+          "network",
+          "items"
+        ],
+        "properties": {
+          "network": {
+            "const": "TESTNET"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/Invoice"
+            }
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        }
+      },
+      "UnmatchedReceipts": {
+        "type": "object",
+        "required": [
+          "network",
+          "items"
+        ],
+        "properties": {
+          "network": {
+            "const": "TESTNET"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": [
+                "eventId",
+                "transactionHash",
+                "from",
+                "amountStroops",
+                "ledger",
+                "closedAt"
+              ],
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "transactionHash": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "amountStroops": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "ledger": {
+                  "type": "integer"
+                },
+                "closedAt": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        }
+      },
       "PayRun": {
         "type": "object",
         "required": [
@@ -221,6 +485,10 @@
           "maxFeeStroops": {
             "type": "string",
             "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "paymentRequestId": {
+            "type": "string",
+            "pattern": "^[a-f0-9-]{36}$"
           }
         }
       },
@@ -382,6 +650,9 @@
             "pattern": "^[a-f0-9]{64}$"
           },
           "eventId": {
+            "type": "string"
+          },
+          "paymentRequestId": {
             "type": "string"
           },
           "failureCode": {
@@ -654,6 +925,361 @@
     }
   },
   "paths": {
+    "/api/v1/payment-requests/{requestId}": {
+      "parameters": [
+        {
+          "name": "requestId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read checkout terms from an unguessable payment link; excludes payer and receipt history",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/{walletId}/invoices": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Save or recover immutable invoice request by merchant wallet and invoice reference",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        }
+      },
+      "get": {
+        "summary": "List owned invoice payment requests",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoicePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/wallets/{walletId}/invoices/{requestId}": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "requestId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read owned invoice and allocated receipts",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/{walletId}/invoices/{requestId}/allocate": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "requestId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Assign an entire verified unmatched receipt once, with an audit note",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eventId",
+                  "note"
+                ],
+                "properties": {
+                  "eventId": {
+                    "type": "string",
+                    "pattern": "^TESTNET:[a-f0-9]{64}:[0-9]+:[0-9]+$",
+                    "maxLength": 128
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/{walletId}/unmatched-receipts": {
+      "parameters": [
+        {
+          "name": "walletId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "List verified incoming native XLM receipts without invoice allocation",
+        "security": [
+          {
+            "WalletSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted invoice data. Only independently verified native XLM receipts affect settlement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnmatchedReceipts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Untrusted mutation origin"
+          },
+          "404": {
+            "description": "Resource not found or not owned"
+          },
+          "409": {
+            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+          },
+          "503": {
+            "description": "Invoice service unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/wallets/{walletId}/attempt-by-key/{key}/reset": {
       "parameters": [
         {

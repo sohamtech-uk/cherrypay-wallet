@@ -27,7 +27,7 @@ import fs from 'node:fs';
 const env=process.env, root=env.WALLET_AZURE_TMP;
 const app=JSON.parse(fs.readFileSync(`${root}/apps.json`)).find(a=>a.name===env.AZURE_CONTAINER_APP);
 if(app && (app.tags?.application!=='cherrypay-wallet' || app.tags?.network!=='stellar-testnet')) throw Error('Refusing to overwrite an unrelated Container App');
-if(app && app.properties.template.containers.some(c=>c.env?.some(v=>v.name==='WALLET_PAYMENTS_ENABLED' && v.value==='true'))) throw Error('This bootstrap deployment cannot update an activated payment runtime');
+if(app && app.properties.template.containers.some(c=>c.env?.some(v=>['WALLET_PAYMENTS_ENABLED','WALLET_PRIMARY_PAYMENTS_ENABLED'].includes(v.name) && (v.value==='true' || v.secretRef)))) throw Error('This bootstrap deployment cannot update an activated payment runtime');
 if(app && app.properties.template.containers.some(c=>c.env?.some(v=>v.name==='AURORA_INTENTS_ENABLED' && v.value==='true'))) throw Error('This Testnet deployment cannot update an activated Aurora runtime');
 if(app?.properties.configuration.secrets?.some(s=>s.name==='aurora-api-key') && !env.AURORA_INTENTS_API_KEY?.trim()) throw Error('Supply the existing AURORA_INTENTS_API_KEY to preserve status recovery across releases');
 fs.writeFileSync(`${root}/domains.json`,JSON.stringify(app?.properties.configuration.ingress.customDomains??[]));

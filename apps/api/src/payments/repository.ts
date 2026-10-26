@@ -12,6 +12,7 @@ export interface PaymentRepository {
   get(id: string): Promise<Attempt>;
   byKey(walletId: string, key: string): Promise<Attempt | undefined>;
   create(wallet: Wallet, intent: Intent, key: string): Promise<Attempt>;
+  assertPaymentRequest?(attempt: Attempt): Promise<void>;
   /** Atomically find an existing attempt, or block a late create for an absent key. */
   findOrBlockMissing(wallet:Wallet,key:string):Promise<Attempt|undefined>;
   claim(id: string, statuses: string[]): Promise<{ attempt: Attempt; token: string }>;

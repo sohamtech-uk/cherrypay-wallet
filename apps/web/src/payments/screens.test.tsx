@@ -94,6 +94,7 @@ it('cancels the persisted preview before editing and only then clears the recove
   await user.click(screen.getByRole('button', { name: 'Edit payment' }));
   await screen.findByRole('button', { name: 'Preview payment' });
   expect(adapter.cancelAttempt).toHaveBeenCalledWith('q'); expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeNull();
+  expect(document.activeElement).toBe(screen.getByLabelText('Recipient address'));
 });
 
 it('resets a missing or unsigned payment only after server confirmation and enables a new recipient',async()=>{
@@ -142,4 +143,40 @@ it('polls unresolved transaction detail every five seconds until a terminal resu
   await waitFor(() => expect(screen.getByText('Confirmed and verified')).toBeTruthy());
   expect(adapter.getAttempt).toHaveBeenCalledTimes(2);
   interval.mockRestore();
+});
+
+
+it('resolves an opted-in email before preparing, shows exact fees, and requires re-verification before approval', async () => {
+  const adapter = service();
+  adapter.supportedDestinations = ['classic','contract'];
+  const verifiedAddress = StrKey.encodeContract(Buffer.alloc(32, 7));
+  adapter.resolveRecipientEmail = vi.fn(async (email) => ({
+    network: NETWORK, email, address: verifiedAddress,
+    mailboxVerified: true as const, walletBindingVerified: true as const, legalIdentityVerified: false as const
+  }));
+  vi.mocked(adapter.prepare).mockImplementation(async intent => ({
+    ...intent,id:'q-email',feeStroops:'10000000',feePayer:'sponsor',
+    spendableStroops:'100000000',expiresAt:new Date(Date.now()+60000).toISOString()
+  }));
+  mount(<Send/>,adapter);
+  const user=userEvent.setup();
+  await user.click(screen.getByLabelText('Verified email'));
+  await user.type(screen.getByLabelText('Recipient email'),'receiver@example.com');
+  await user.type(screen.getByLabelText('Exact amount (XLM)'),'2');
+  await user.click(screen.getByRole('button',{name:'Preview payment'}));
+  expect(adapter.resolveRecipientEmail).toHaveBeenCalledWith('receiver@example.com');
+  expect(adapter.prepare).toHaveBeenCalledWith(expect.objectContaining({destination:verifiedAddress,amountStroops:'20000000'}),undefined);
+  expect(screen.getByText(/receiver@example.com · mailbox verified/)).toBeTruthy();
+  expect(screen.getByText('Maximum Stellar network fee allowance')).toBeTruthy();
+  expect(screen.getByText('Your maximum network fee contribution')).toBeTruthy();
+  expect(screen.getByText('Maximum total debit from your wallet')).toBeTruthy();
+  await user.click(screen.getByRole('checkbox',{name:/checked the recipient, amount, fee/}));
+  vi.mocked(adapter.resolveRecipientEmail).mockResolvedValueOnce({
+    network:NETWORK,email:'receiver@example.com',address:StrKey.encodeContract(Buffer.alloc(32,9)),
+    mailboxVerified:true,walletBindingVerified:true,legalIdentityVerified:false
+  });
+  await user.click(screen.getByRole('button',{name:'Approve exact payment'}));
+  expect(await screen.findByText(/Recipient wallet changed/)).toBeTruthy();
+  expect(adapter.createAttempt).not.toHaveBeenCalled();
+  expect(adapter.approve).not.toHaveBeenCalled();
 });

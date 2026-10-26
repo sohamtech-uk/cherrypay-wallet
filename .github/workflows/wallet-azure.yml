@@ -1,10 +1,10 @@
 name: Wallet Azure production images
 on:
   pull_request:
-    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
+    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', 'scripts/check-judge-readiness*.mjs', '.github/workflows/wallet-azure.yml']
   push:
     branches: [develop, main]
-    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
+    paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', 'scripts/check-judge-readiness*.mjs', '.github/workflows/wallet-azure.yml']
   workflow_dispatch:
 permissions:
   contents: read

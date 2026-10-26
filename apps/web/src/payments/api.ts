@@ -1,5 +1,6 @@
 import { startAuthentication } from '@simplewebauthn/browser';
-import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput } from './model';
+import { invoiceAdapter } from '../invoices/api';
+import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput, type ResolvedRecipient } from './model';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string) {
@@ -54,7 +55,9 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
     if (a.walletId !== walletId || a.network !== NETWORK || a.from !== address || !addressKind(text(a.destination)) || typeof a.verified !== 'boolean' || typeof a.status !== 'string' || !Object.hasOwn(statuses, a.status)) throw Error('Payment does not match this wallet or network.');
     const transactionHash = hash(a.transactionHash);
     if (a.verified && (a.status !== 'confirmed' || !transactionHash)) throw Error('Invalid verified payment.');
-    return { id: text(a.id), network: NETWORK, from: address, destination: text(a.destination), amountStroops: integer(a.amountStroops), feeStroops: a.feeStroops === undefined ? '0' : integer(a.feeStroops), feeKnown: a.feeStroops !== undefined, createdAt: date(a.createdAt), status: statuses[a.status], verified: a.verified, transactionHash, failureMessage: a.failureCode ? 'Payment could not complete. Check its status before starting another payment.' : undefined };
+    const paymentRequestId=a.paymentRequestId===undefined?undefined:text(a.paymentRequestId);
+    if(paymentRequestId!==undefined&&!/^[a-f0-9-]{36}$/.test(paymentRequestId))throw Error('Invalid invoice payment reference.');
+    return { id: text(a.id), network: NETWORK, from: address, destination: text(a.destination), amountStroops: integer(a.amountStroops), ...(paymentRequestId?{paymentRequestId}:{}), feeStroops: a.feeStroops === undefined ? '0' : integer(a.feeStroops), feeKnown: a.feeStroops !== undefined, createdAt: date(a.createdAt), status: statuses[a.status], verified: a.verified, transactionHash, failureMessage: a.failureCode ? 'Payment could not complete. Check its status before starting another payment.' : undefined };
   };
   const read = async (id: string) => { const raw = await api(`${base}/attempts/${encodeURIComponent(id)}`); const a = parse(raw); if (a.id !== id) throw Error('Attempt identity mismatch.'); return { raw: object(raw), attempt: a }; };
   const balance = async () => {
@@ -80,13 +83,13 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       if (!signer && wallet.approvalMode !== 'webauthn') throw Error('Transaction signing is not connected.');
       if (!key) throw Error('A saved recovery key is required before preparation.');
       if (intent.network !== NETWORK || intent.from !== address || destinationError(intent.destination, supportedDestinations) || intent.destination === address || BigInt(integer(intent.amountStroops)) <= 0n) throw Error('Unsupported payment intent.');
-      const raw = object(await api(`${base}/attempts`, { network: NETWORK, destination: intent.destination, amountStroops: intent.amountStroops, maxFeeStroops: '10000000' }, { 'Idempotency-Key': key }));
+      const raw = object(await api(`${base}/attempts`, { network: NETWORK, destination: intent.destination, amountStroops: intent.amountStroops, maxFeeStroops: '10000000', ...(intent.paymentRequestId?{paymentRequestId:intent.paymentRequestId}:{}) }, { 'Idempotency-Key': key }));
       const q = await quoteFor(raw); checkQuote(q, intent); return q;
     },
     async createAttempt(quote, key) {
       // Preparation already persisted the attempt. Never POST a replacement here.
       const found = await adapter.getAttemptByKey(key);
-      if (!found || found.id !== quote.id || found.destination !== quote.destination || found.amountStroops !== quote.amountStroops || found.feeStroops !== quote.feeStroops) throw Error('Stored attempt differs from the reviewed payment.');
+      if (!found || found.id !== quote.id || found.destination !== quote.destination || found.amountStroops !== quote.amountStroops || found.feeStroops !== quote.feeStroops || found.paymentRequestId!==quote.paymentRequestId) throw Error('Stored attempt differs from the reviewed payment.');
       return found;
     },
     async approve(id, reviewed) {
@@ -100,20 +103,20 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
         const begin = object(await api(`${base}/attempts/${encodeURIComponent(id)}/approval/options`, {}));
         const offered = object(begin.attempt), offeredAttempt = parse(offered);
         const offeredApproval = object(offered.approval);
-        if (offeredAttempt.id !== id || offeredAttempt.destination !== reviewed.destination || offeredAttempt.amountStroops !== reviewed.amountStroops || offeredAttempt.feeStroops !== reviewed.feeStroops || offeredAttempt.status !== 'awaiting_approval' || offeredApproval.authXdr !== approval.authXdr || offeredApproval.expiresAt !== q.expiresAt || Date.parse(date(begin.expiresAt)) <= Date.now()) throw Error('Approval challenge differs from the reviewed payment.');
+        if (offeredAttempt.id !== id || offeredAttempt.destination !== reviewed.destination || offeredAttempt.amountStroops !== reviewed.amountStroops || offeredAttempt.paymentRequestId!==reviewed.paymentRequestId || offeredAttempt.feeStroops !== reviewed.feeStroops || offeredAttempt.status !== 'awaiting_approval' || offeredApproval.authXdr !== approval.authXdr || offeredApproval.expiresAt !== q.expiresAt || Date.parse(date(begin.expiresAt)) <= Date.now()) throw Error('Approval challenge differs from the reviewed payment.');
         const options = object(begin.options);
         if (options.userVerification !== 'required' || !/^[A-Za-z0-9_-]{43}$/.test(text(options.challenge)) || !Array.isArray(options.allowCredentials) || options.allowCredentials.length === 0) throw Error('Invalid transfer approval options.');
         const response = await authenticate({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
         checkQuote(q, reviewed);
         const result = parse(await api(`${base}/attempts/${encodeURIComponent(id)}/approval/verify`, { requestID: text(begin.requestID), response }));
-        if (result.id !== id || result.destination !== reviewed.destination || result.amountStroops !== reviewed.amountStroops) throw Error('Approval response mismatch. Check existing attempt.');
+        if (result.id !== id || result.destination !== reviewed.destination || result.amountStroops !== reviewed.amountStroops || result.paymentRequestId!==reviewed.paymentRequestId) throw Error('Approval response mismatch. Check existing attempt.');
         return result;
       }
       const authXdr = await signer!({ attemptId: id, walletId, intent: { network: NETWORK, from: address, destination: attempt.destination, amountStroops: attempt.amountStroops }, feeStroops: q.feeStroops, authXdr: text(approval.authXdr), expiresAt: q.expiresAt, expirationLedger: Number(approval.expirationLedger) });
       checkQuote(q, reviewed);
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(authXdr) || authXdr.length > 16000) throw Error('Invalid signed authorization.');
       const result = parse(await api(`${base}/attempts/${encodeURIComponent(id)}/approve`, { authXdr }));
-      if (result.id !== id || result.destination !== attempt.destination || result.amountStroops !== attempt.amountStroops) throw Error('Approval response mismatch. Check existing attempt.');
+      if (result.id !== id || result.destination !== attempt.destination || result.amountStroops !== attempt.amountStroops || result.paymentRequestId!==attempt.paymentRequestId) throw Error('Approval response mismatch. Check existing attempt.');
       return result;
     },
     async getAttempt(id) { return (await read(id)).attempt; },
@@ -143,6 +146,19 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
       return { items, nextCursor: cursor(data.nextCursor) };
     },
   };
+  adapter.resolveRecipientEmail = async (email: string): Promise<ResolvedRecipient> => {
+    const normalized = email.trim().toLowerCase();
+    if (!/^[^\\s@]{1,64}@[^\\s@]+\\.[^\\s@]+$/.test(normalized) || normalized.length > 254) throw Error('Enter a valid recipient email.');
+    const value = object(await api('recipients/resolve?email=' + encodeURIComponent(normalized)));
+    if (value.network !== NETWORK || value.email !== normalized || value.mailboxVerified !== true ||
+        value.walletBindingVerified !== true || value.legalIdentityVerified !== false ||
+        typeof value.address !== 'string' || addressKind(value.address) !== 'contract' ||
+        value.address === address || !supportedDestinations.includes('contract'))
+      throw Error('Recipient email is not linked to a supported verified Testnet wallet.');
+    return { network: NETWORK, email: normalized, address: value.address,
+      mailboxVerified: true, walletBindingVerified: true, legalIdentityVerified: false };
+  };
+  adapter.invoices=invoiceAdapter(api,walletId,address);
   const runReference = (value: unknown) => { const s = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(s)) throw Error('Invalid pay run reference.'); return s; };
   const parseRun = (value: unknown): PayRun => {
     const r = object(value);

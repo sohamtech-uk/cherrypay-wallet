@@ -3,6 +3,10 @@
 Stellar Testnet wallet UI with passkey profiles, authenticated wallet discovery,
 indexed balances, receive instructions, payment review/approval and verified history.
 
+## Developer reference
+
+Open `/developers` (alias `/api-docs`) for a searchable, read-only directory of endpoints from the live same-origin `/api/v1/openapi.json`. The portal displays current `/health` capability flags and does not execute API mutations. See [API portal guide](../../docs/DEVELOPER_API_PORTAL.md).
+
 ## Run
 
 ```sh

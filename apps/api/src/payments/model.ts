@@ -16,16 +16,18 @@ export function amount(value: string): bigint {
   return parsed;
 }
 export type Wallet = { id: string; owner: string; address: string; policy: string; routes: ('classic' | 'contract')[]; createdAt: number };
-export type Intent = { network: typeof NETWORK; destination: string; amountStroops: string; maxFeeStroops: string };
+export type Intent = { network: typeof NETWORK; destination: string; amountStroops: string; maxFeeStroops: string; paymentRequestId?: string };
 export function validateIntent(intent: Intent, wallet: Wallet) {
   requireThat(intent.network === NETWORK, 'TESTNET_ONLY', 400);
+  requireThat(intent.paymentRequestId === undefined || typeof intent.paymentRequestId === 'string' && /^[a-f0-9-]{36}$/.test(intent.paymentRequestId), 'INVALID_PAYMENT_REQUEST_ID', 400);
   amount(intent.amountStroops); amount(intent.maxFeeStroops);
   const route = StrKey.isValidEd25519PublicKey(intent.destination) ? 'classic' : StrKey.isValidContract(intent.destination) ? 'contract' : null;
   requireThat(route && wallet.routes.includes(route), 'UNSUPPORTED_DESTINATION', 400);
   requireThat(intent.destination !== wallet.address, 'SELF_TRANSFER_UNSUPPORTED', 400);
 }
 export function digest(intent: Intent): string {
-  return createHash('sha256').update(JSON.stringify([intent.network, intent.destination, intent.amountStroops, intent.maxFeeStroops])).digest('hex');
+  // Preserve existing digests for ordinary payments; invoice links are immutable as well.
+  return createHash('sha256').update(JSON.stringify([intent.network, intent.destination, intent.amountStroops, intent.maxFeeStroops, ...(intent.paymentRequestId ? [intent.paymentRequestId] : [])])).digest('hex');
 }
 export type Status = 'preparing' | 'awaiting_approval' | 'authorizing' | 'ready' | 'pending' | 'unknown' | 'confirmed' | 'failed' | 'rejected';
 export type Prepared = { transactionXdr: string; authXdr: string; feeStroops: string; expiresAt: number; expirationLedger: number; ledger: number };

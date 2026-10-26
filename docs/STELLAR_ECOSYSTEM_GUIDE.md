@@ -122,3 +122,9 @@ Read the task-specific skills listed in [AGENTS.md](../AGENTS.md). This review u
 before implementation; catalog snippets and capability tables can age. Community
 skill inclusion is not a security audit. Keep the existing
 [Stellar Build review guidance](MONAD_REUSE.md#stellar-references-used) as well.
+
+## Invoice checkout
+
+[Invoice QR reconciliation](INVOICE_RECONCILIATION.md) uses the existing native XLM
+SAC payment path and verified transfer store. Invoice references are durable
+application metadata; address-only QR deposits remain unmatched.

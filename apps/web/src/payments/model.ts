@@ -24,12 +24,26 @@ export function destinationError(value: string, supported: RouteKind[]): string 
   if (!kind) return 'Enter a checksum-valid Stellar G-address or C-address. Muxed addresses, federation names and payment links are not supported.';
   return supported.includes(kind) ? '' : `Transfers to ${kind === 'contract' ? 'smart contracts' : 'classic accounts'} are not enabled by this wallet service.`;
 }
-export type Intent = { network: typeof NETWORK; from: string; destination: string; amountStroops: string };
+export type Intent = { network: typeof NETWORK; from: string; destination: string; amountStroops: string; paymentRequestId?: string };
 export type Quote = Intent & { id: string; feeStroops: string; feePayer: 'wallet' | 'sponsor'; spendableStroops: string; expiresAt: string };
+export type ResolvedRecipient = { network: typeof NETWORK; email: string; address: string; mailboxVerified: true; walletBindingVerified: true; legalIdentityVerified: false };
+/** All figures are in exact stroops. Quoted fee is an ALLOWANCE, not an actual charged fee. */
+export function paymentBreakdown(quote: Quote) {
+  const transfer = BigInt(quote.amountStroops), feeLimit = BigInt(quote.feeStroops);
+  const walletNetworkFeeLimit = quote.feePayer === 'wallet' ? feeLimit : 0n;
+  return {
+    transferStroops: transfer.toString(),
+    serviceFeeStroops: '0', // No wallet platform fee is collected by the current native-XLM payment engine.
+    maximumNetworkFeeStroops: feeLimit.toString(),
+    walletNetworkFeeLimitStroops: walletNetworkFeeLimit.toString(),
+    sponsorNetworkFeeLimitStroops: (feeLimit-walletNetworkFeeLimit).toString(),
+    maximumWalletDebitStroops: (transfer+walletNetworkFeeLimit).toString(),
+  };
+}
 export type AttemptStatus = 'awaiting_approval' | 'submitted' | 'pending' | 'unknown' | 'confirmed' | 'failed' | 'rejected';
 export type Attempt = Intent & { id: string; status: AttemptStatus; createdAt: string; feeStroops: string; feeKnown?: boolean; transactionHash?: string; verified: boolean; failureMessage?: string };
 export function checkQuote(quote: Quote, intent: Intent): void {
-  if (!quote.id || quote.network !== NETWORK || quote.from !== intent.from || quote.destination !== intent.destination || quote.amountStroops !== intent.amountStroops) throw new Error('The fee preview does not match this payment. Request a new preview.');
+  if (!quote.id || quote.network !== NETWORK || quote.from !== intent.from || quote.destination !== intent.destination || quote.amountStroops !== intent.amountStroops || quote.paymentRequestId !== intent.paymentRequestId) throw new Error('The fee preview does not match this payment. Request a new preview.');
   if (!Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) throw new Error('Fee preview expired. Request a new preview.');
   if (quote.feePayer !== 'wallet' && quote.feePayer !== 'sponsor') throw new Error('Unknown fee payer.');
   xlm(quote.feeStroops); xlm(quote.spendableStroops);
@@ -52,6 +66,8 @@ export interface PaymentAdapter {
   canSign?: boolean;
   persistentPreview?: boolean;
   payroll?: PayrollAdapter;
+  invoices?: InvoiceAdapter;
+  resolveRecipientEmail?(email: string): Promise<ResolvedRecipient>;
   getBalance?(): Promise<{ amountStroops: string; ledger: number; updatedAt: number } | null>;
   getQuote?(id: string): Promise<Quote>;
   cancelAttempt?(id: string): Promise<Attempt>;
@@ -65,6 +81,18 @@ export interface PaymentAdapter {
   getAttempt(id: string): Promise<Attempt>;
   getAttemptByKey(key: string): Promise<Attempt | null>;
   listAttempts(cursor?: string): Promise<{ items: Attempt[]; nextCursor?: string }>;
+}
+
+export type InvoiceInput = {network:'TESTNET';invoiceReference:string;merchantName:string;amountStroops:string;expiresAt:number};
+export type Invoice = InvoiceInput & {id:string;asset:'XLM';assetContract:string;destination:string;paidStroops:string;remainingStroops:string;status:'unpaid'|'partially_paid'|'paid'|'overpaid';expired:boolean;paymentPending:boolean;createdAt:number};
+export type InvoiceReceipt = {eventId:string;transactionHash:string;from:string;amountStroops:string;ledger:number;closedAt:number};
+export type InvoiceDetail = Invoice & {walletId:string;receipts:(InvoiceReceipt & {method:'manual'|'checkout';actor:string;note:string;allocatedAt:number;late:boolean})[];receiptsTruncated:boolean};
+export interface InvoiceAdapter {
+  create(input:InvoiceInput):Promise<InvoiceDetail>;
+  get(id:string):Promise<InvoiceDetail>;
+  list(cursor?:string):Promise<{items:Invoice[];nextCursor?:string}>;
+  unmatched(cursor?:string):Promise<{items:InvoiceReceipt[];nextCursor?:string}>;
+  allocate(id:string,eventId:string,note:string):Promise<InvoiceDetail>;
 }
 
 

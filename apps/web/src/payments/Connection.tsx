@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { readAccess } from './access-api';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
 import { parseDeployment, type DeploymentView } from './deployment';
@@ -24,7 +25,10 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
+  const [sessionVersion,setSessionVersion]=useState(0);
   const [credentialCount, setCredentialCount] = useState(0);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [emailPaymentsEnabled, setEmailPaymentsEnabledState] = useState(false);
   const [canSign, setCanSign] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -32,6 +36,16 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [notice, setNotice] = useState('');
   const [deploymentStatus, setDeploymentStatus] = useState('');
   const [deployment, setDeployment] = useState<DeploymentView | null>(null);
+  const access = useMemo(() => {
+    const session=token.current,id=generation.current;
+    const api=apiClient(()=>session);
+    const check=()=>{if(!sessionVersion||!authenticated||!accountId||!session||generation.current!==id||token.current!==session||Date.now()>=deadline.current)throw Error('Session expired');};
+    return {
+      listAccess:async()=>{check();const page=await readAccess(api);check();return page;},
+      revokeAccess:async(eventId:string)=>{check();await api(`session/access-history/${encodeURIComponent(eventId)}/revoke`,{});check();},
+      shareLocation:async(latitude:number,longitude:number)=>{check();await api('session/location',{latitude,longitude});check();},
+    };
+  },[authenticated,accountId,sessionVersion]);
   useEffect(() => () => {
     generation.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
     const abandoned = token.current; token.current = undefined;
@@ -41,7 +55,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   function clearSession(message = '') {
     generation.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
     openedWallet.current=undefined;
-    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
+    setAuthenticated(false); setConnected(false); setCredentialCount(0); setEmailVerified(false); setEmailPaymentsEnabledState(false); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
   async function openWallet(selected: OwnedWallet, id: number) {
@@ -106,7 +120,9 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
-    setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
+    setAuthenticated(true); setSessionVersion(v=>v+1); setCredentialCount(Number(session.credentialCount));
+    // Profile state is read with the private bearer token, never placed in the public adapter.
+    void refreshEmailSettings(id,owner).catch(() => { if (active(id)) { setEmailVerified(false); setEmailPaymentsEnabledState(false); } });
     if (previous && previous !== verifiedToken) {
       try { await revoke(previous); }
       catch { if (active(id)) setError('Your new session is active. Previous session logout could not be confirmed; it will expire.'); }
@@ -205,6 +221,49 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
       }
     } finally {if(generation.current===id){lock.current=false;setBusy(false);}}
   }
+  async function refreshEmailSettings(id: number, expectedAccount: string) {
+    const identity = object(await apiClient(() => token.current)('wallet/me'));
+    if (!active(id)) return;
+    if (identity.accountID !== expectedAccount || typeof identity.emailVerified !== 'boolean' || typeof identity.emailPaymentsEnabled !== 'boolean')
+      throw Error('The account profile differs from this session.');
+    setEmailVerified(identity.emailVerified);
+    setEmailPaymentsEnabledState(identity.emailPaymentsEnabled);
+  }
+  async function emailAction(operation: () => Promise<void>) {
+    const id = generation.current;
+    if (lock.current || !active(id)) throw Error('Reconnect your wallet before changing email settings.');
+    lock.current = true; setBusy(true); setError(''); setNotice('');
+    try { await operation(); }
+    catch (e) {
+      if (active(id)) setError(e instanceof Error ? e.message : 'Email directory settings are unavailable.');
+      throw e;
+    } finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
+  }
+  async function requestEmailVerification() {
+    await emailAction(async () => {
+      const value = object(await apiClient(() => token.current)('wallet/email-verification/request', {}));
+      if (value.status !== 'sent' && value.status !== 'already_verified') throw Error('Verification email could not be confirmed.');
+      if (value.status === 'already_verified') setEmailVerified(true);
+      setNotice(value.status === 'already_verified' ? 'Your email is already verified.' : 'An 8-digit verification code was sent. Check your email; it expires in 15 minutes.');
+    });
+  }
+  async function confirmEmailVerification(code: string) {
+    await emailAction(async () => {
+      if (!/^[0-9]{8}$/.test(code)) throw Error('Enter the 8-digit verification code.');
+      const result = object(await apiClient(() => token.current)('wallet/email-verification/confirm', { code }));
+      if (result.emailVerified !== true) throw Error('Could not verify your email.');
+      setEmailVerified(true); setNotice('Email verified. You can now opt in to email-based wallet payments.');
+    });
+  }
+  async function setEmailPaymentsEnabled(enabled: boolean) {
+    await emailAction(async () => {
+      const value = object(await apiClient(() => token.current)('wallet/email-directory', { enabled }));
+      if (value.emailPaymentsEnabled !== enabled || value.emailVerified !== true && enabled)
+        throw Error('Directory settings were not confirmed.');
+      setEmailPaymentsEnabledState(enabled);
+      setNotice(enabled ? 'Your verified email is discoverable by other Cherry Wallet users for Testnet payments.' : 'Email-based wallet discovery has been disabled.');
+    });
+  }
   async function disconnect() {
     const abandoned = token.current;
     clearSession(); setNotice(''); const id = generation.current;
@@ -218,13 +277,14 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
   return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
-    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
-    {showSetup && <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
-    <h2>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h2>
-    <p>{authenticated ? 'Your account is signed in. Check wallet deployment and funding below before sending or receiving.' : 'Get started with your email and device passkey. New accounts require a verified wallet deployment before payments are available.'}</p>
-    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
+    emailVerified, emailPaymentsEnabled, requestEmailVerification, confirmEmailVerification, setEmailPaymentsEnabled,
+    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect, ...access }}>
+    {showSetup && <section className="card payment-screen wallet-connect" aria-label="Payment service connection" aria-busy={busy}>
+    <h1>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h1>
+    <p>{authenticated ? 'Finish setting up your wallet to start making payments.' : 'One email. One passkey. Your own wallet for sending and receiving XLM.'}</p>
+    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Passkey account signed in (email mailbox verification is separate)</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
       {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
-      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your email is authenticated. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
+      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your passkey session is authenticated. Manage your account, mailbox verification and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
         {deployment?.address ? <>
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>
@@ -244,7 +304,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
             <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
-      <h3>Security and recovery</h3><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p>
+      <details className="disclosure"><summary>About passkeys and recovery</summary><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p></details>
       {showAccountActions && <><button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button></>}
     </> : <>
@@ -253,7 +313,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
         <input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/>
         <button type="submit">{busy ? 'Please wait…' : 'Continue with email'}</button>
       </fieldset></form>
-      <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
+      <p>Your device will ask for your passkey, or help create one for your first visit. Use a device with your existing passkey to return.</p>
     </>}
     {showAccountActions && accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
     {notice && <p role="status">{notice}</p>}

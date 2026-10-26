@@ -44,7 +44,7 @@ it('completes returning-user sign-in, keeps one session through dashboard/profil
   expect(screen.queryByRole('checkbox',{name:'Use a legacy account ID'})).toBeNull();
   await user.type(screen.getByLabelText('Email address (Account ID)'),'alice@example.com');
   await user.click(screen.getByRole('button',{name:'Continue with email'}));
-  expect(await screen.findByRole('heading',{name:'Wallet dashboard'})).toBeTruthy();
+  expect(await screen.findByRole('heading',{name:'Home'})).toBeTruthy();
   await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
   expect(await screen.findByLabelText('Email address / Account ID')).toHaveProperty('value','alice@example.com');
   expect(screen.queryByLabelText('Payment service connection')).toBeNull();
@@ -52,7 +52,7 @@ it('completes returning-user sign-in, keeps one session through dashboard/profil
   await user.click(screen.getByRole('button',{name:'Show address'}));
   expect(screen.getByLabelText('Wallet address')).toHaveProperty('value',address);
   await user.click(screen.getByRole('link',{name:'Dashboard'}));
-  expect(screen.getByRole('heading',{name:'Wallet dashboard'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'Home'})).toBeTruthy();
   await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
   expect(screen.getByLabelText('Email address / Account ID')).toHaveProperty('value','alice@example.com');
   expect(calls.mock.calls.filter(([url])=>url.endsWith('/passkeys/onboarding/options'))).toHaveLength(1);
@@ -70,7 +70,7 @@ it('registers a new email with a passkey and shows wallet deployment unavailable
   await user.type(screen.getByLabelText('Email address (Account ID)'),'alice@example.com');
   await user.click(screen.getByRole('button',{name:'Continue with email'}));
   expect(await screen.findByText(/Automatic wallet creation is disabled on this server/)).toBeTruthy();
-  expect(screen.getByText('✓ Email and passkey verified')).toBeTruthy();
+  expect(screen.getByText('✓ Passkey account signed in (email mailbox verification is separate)')).toBeTruthy();
   expect(screen.getByText('Wallet deployment unavailable')).toBeTruthy();
   expect(screen.queryByText('Wallet connected.')).toBeNull();
   await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
