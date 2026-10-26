@@ -119,6 +119,17 @@ export async function connectPaymentAdapter(api: ApiClient, walletId: string, si
     async getAttempt(id) { return (await read(id)).attempt; },
     async getQuote(id) { return quoteFor((await read(id)).raw); },
     async cancelAttempt(id) { const a = parse(await api(`${base}/attempts/${encodeURIComponent(id)}/cancel`, {})); if (a.id !== id) throw Error('Attempt identity mismatch.'); return a; },
+    async resetAttempt(key) {
+      if(!/^[A-Za-z0-9_-]{16,128}$/.test(key))throw Error('Invalid saved payment key.');
+      let result:Record<string,unknown>;
+      try {result=object(await api(`${base}/attempt-by-key/${encodeURIComponent(key)}/reset`,{}));}
+      catch {throw Error('Reset could not be confirmed. A payment may be processing or submitted. Check the existing attempt before trying again.');}
+      if(result.network!==NETWORK||result.walletId!==walletId||result.key!==key||result.reset!==true||!['not_created','cancelled','rejected','failed','confirmed'].includes(String(result.outcome)))throw Error('Invalid reset confirmation. Keep the existing payment record.');
+      if(result.outcome!=='not_created'){
+        const a=parse(result.attempt);
+        if(!['rejected','failed'].includes(a.status)&&!(a.status==='confirmed'&&a.verified))throw Error('Payment outcome is still unresolved.');
+      }else if(result.attempt!==undefined)throw Error('Invalid reset confirmation.');
+    },
     async getAttemptByKey(key) { try { return parse(await api(`${base}/attempt-by-key/${encodeURIComponent(key)}`)); } catch (e) { if (e instanceof ApiError && e.status === 404 && e.code === 'ATTEMPT_NOT_FOUND') return null; throw e; } },
     async listAttempts(next) { const data = object(await api(`${base}/attempts${next ? `?cursor=${encodeURIComponent(next)}` : ''}`)); if (!Array.isArray(data.items)) throw Error('Invalid history.'); return { items: data.items.map(parse), nextCursor: cursor(data.nextCursor) }; },
     async listTransfers(next) {

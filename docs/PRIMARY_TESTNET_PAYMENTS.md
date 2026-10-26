@@ -14,7 +14,7 @@ Activation requires a durable CONFIRMED deployment, verified primary binding, ca
 
 The existing exact-transfer authorization, session/owner binding, RP/origin/user verification, counter checks, nonce/ledger expiry, on-chain auth-digest comparison and enforcing simulation remain required. Only the original primary credential can spend. The fee relayer cannot authorize a C-wallet debit. Signed transaction bytes are checkpointed before submission; unknown outcomes keep the same attempt and source reservation until reconciled. Recipients can be funded G-accounts or another verified Cherry Pay C-wallet. Receive instructions explicitly require native XLM SAC transfers for C-addresses; classic payment operations do not target contracts.
 
-Balance requests read the native SAC directly after owner authentication. Confirmed transfers are decoded from committed RPC transaction events and shown in both wallets' history. The monitor starts at the earliest verified deployment and persists that boundary and its cursor across restarts. It never resets to conceal missing history; an RPC retention gap requires operator reconciliation. Indexer read models remain optional and cannot verify receipts or authorize spending.
+Balance requests read the native SAC directly after owner authentication. Confirmed transfers are decoded from committed RPC transaction events and shown in both wallets' history. Each automatic wallet has a separate native SAC event filter for incoming and outgoing transfers, starting at its own confirmed deployment. Its start ledger and cursor persist across restarts. The old global cursor is preserved; unrelated unverifiable network transactions no longer block another wallet’s receipts. It never resets to conceal missing history; an RPC retention gap requires operator reconciliation. Indexer read models remain optional and cannot verify receipts or authorize spending.
 
 ## Recovery and rollback
 
@@ -25,3 +25,9 @@ Pause new payment access with `WALLET_PRIMARY_PAYMENTS_ENABLED=false`. Preserve 
 ## Validation scope
 
 Unit tests exercise exact primary authorization, wrong-credential rejection, explicit mode selection, no two-rule downgrade, recipient checks, owner-only activation, fresh balances and automatic UI connection. PostgreSQL integration tests cover concurrent activation, credential changes, immutable policy bindings and durable monitor boundaries. These synthetic tests do not substitute for a live RPC-verified transfer or physical-device recovery acceptance.
+
+## Changing a recipient after an interrupted preview
+
+Use **Reset and change recipient** on the Send page. The server cancels an unsigned attempt or confirms that no attempt exists before the browser clears its saved key. An absent key is durably blocked by migration 014, so a delayed original HTTP request cannot revive it. Creation and missing-key reset serialize under the same PostgreSQL advisory lock. Existing attempts, signatures, receipts and idempotency records are retained.
+
+A submitted or unknown signed transaction cannot be reset. Active preparation/authorization leases must finish or expire before cancellation; their fencing prevents late workers from reviving cancelled work. Confirmed or failed attempts retain their outcome and can be left behind when starting a separate payment. Network errors, malformed reset responses, and generic HTTP 404s never authorize local recovery deletion.

@@ -133,9 +133,15 @@ export class StellarChain implements Chain {
     if (result.status !== 'PENDING' && result.status !== 'DUPLICATE') throw new Error('SUBMISSION_UNCERTAIN');
   }
   async outcome(hash: string) { await this.network(); return verifyOutcome(hash, await this.server.getTransaction(hash)); }
-  async events(cursor: string | undefined, startLedger: number) {
+  async events(cursor: string | undefined, startLedger: number, address?: string) {
     await this.network();
-    const result = await this.server.getEvents({ ...(cursor ? { cursor } : { startLedger }), filters: [{ type: 'contract', contractIds: [NATIVE_SAC] }], limit: 100 });
+    if(address)requireThat(StrKey.isValidContract(address),'INVALID_MONITORED_WALLET');
+    const topic=address?new Address(address).toScVal().toXDR('base64'):undefined;
+    const transfer=xdr.ScVal.scvSymbol('transfer').toXDR('base64');
+    // Native SAC topics have three fields on older protocols and four on newer ones.
+    // Separate wallet cursors avoid unrelated network traffic delaying incoming receipts.
+    const result = await this.server.getEvents({ ...(cursor ? { cursor } : { startLedger }), filters: [{ type: 'contract', contractIds: [NATIVE_SAC],
+      ...(topic?{topics:[[transfer,'*',topic],[transfer,'*',topic,'*'],[transfer,topic,'*'],[transfer,topic,'*','*']]}:{}) }], limit: 100 });
     requireThat(typeof result.cursor === 'string' && result.cursor.length > 0, 'INVALID_MONITOR_CURSOR');
     // getEvents is discovery only. Verify each transaction and derive event IDs from the committed event positions.
     const events: TransferEvent[] = [];

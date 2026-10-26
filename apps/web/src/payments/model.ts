@@ -55,6 +55,7 @@ export interface PaymentAdapter {
   getBalance?(): Promise<{ amountStroops: string; ledger: number; updatedAt: number } | null>;
   getQuote?(id: string): Promise<Quote>;
   cancelAttempt?(id: string): Promise<Attempt>;
+  resetAttempt?(idempotencyKey:string):Promise<void>;
   listTransfers?(cursor?: string): Promise<{ items: Attempt[]; nextCursor?: string }>;
   prepare(intent: Intent, idempotencyKey?: string): Promise<Quote>;
   // Persist the attempt BEFORE requesting approval. Reusing the key MUST return the same attempt.

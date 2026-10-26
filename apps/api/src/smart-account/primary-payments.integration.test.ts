@@ -4,7 +4,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '../store.js';
 import { runMigrations } from '../migrations.js';
 import { deploymentFixture } from './test-support/deployment.js';
-import { PrimaryWalletRegistry, paymentMonitorStart } from './primary-payments.js';
+import { PrimaryWalletRegistry, paymentMonitorStart, monitorPrimaryWallets } from './primary-payments.js';
+
+import {PostgresPaymentRepository} from '../payments/postgres-repository.js';
+import {PaymentService} from '../payments/service.js';
+import {mockChain,intent,transfer} from '../payments/test-fixtures.js';
 
 const integration=process.env.RUN_DB_INTEGRATION==='1'?describe:describe.skip;
 integration('automatic primary payment activation (synthetic database evidence)',()=>{
@@ -56,4 +60,31 @@ integration('automatic primary payment activation (synthetic database evidence)'
     expect(await paymentMonitorStart(pool,async()=>1000)).toBe(300);
     expect((await pool.query("SELECT cursor FROM wallet_monitor_cursors WHERE id='TESTNET:native_xlm_sac:monitor'")).rows[0].cursor).toBe('durable-page');
   });
+  it('indexes external receipts with independent durable wallet cursors and preserves failed pages',async()=>{
+    const f=await deployed();await registry.ensure(f.owner,policies);const chain=mockChain(),event=transfer({to:f.descriptor.address});
+    vi.mocked(chain.events).mockImplementation(async(_cursor,_start,address)=>({events:address===f.descriptor.address?[event]:[],cursor:'wallet-page-1'}));
+    await monitorPrimaryWallets(pool,chain);
+    const repo=new PostgresPaymentRepository(pool,'TESTNET:native_xlm_sac:wallet:'+f.descriptor.address);
+    expect(await repo.cursor()).toBe('wallet-page-1');expect((await repo.history(f.descriptor.address))[0].event).toEqual(event);
+    expect(chain.events).toHaveBeenCalledWith(undefined,300,f.descriptor.address);
+    expect((await pool.query("SELECT cursor FROM wallet_monitor_cursors WHERE id='TESTNET:native_xlm_sac:monitor'")).rows[0].cursor).toBe('durable-page');
+    vi.mocked(chain.events).mockImplementation(async(_cursor,_start,address)=>{if(address===f.descriptor.address)throw Error('RPC retention or receipt failure');return {events:[],cursor:'wallet-page-2'};});
+    await expect(monitorPrimaryWallets(pool,chain)).rejects.toThrow('WALLET_MONITOR_RETRY_REQUIRED');expect(await repo.cursor()).toBe('wallet-page-1');
+    vi.mocked(chain.events).mockResolvedValue({events:[],cursor:'wallet-page-3'});await monitorPrimaryWallets(pool,chain);
+    expect(chain.events).toHaveBeenCalledWith('wallet-page-1',300,f.descriptor.address);
+  });
+  it('serializes missing-key reset against late and concurrent creation without deleting attempts',async()=>{
+    const f=await deployed();await registry.ensure(f.owner,policies);const repo=new PostgresPaymentRepository(pool),w=await repo.wallet(f.descriptor.address,f.owner);
+    const chain=mockChain(),service=new PaymentService(repo,chain,policies,300),key='reset-missing-'+randomUUID();
+    expect(await service.reset(f.owner,w.id,key)).toEqual({reset:true,outcome:'not_created'});
+    await expect(repo.create(w,intent,key)).rejects.toThrow('PAYMENT_PREPARATION_RESET');
+    for(let i=0;i<3;i++){
+      const race='reset-race-'+randomUUID();const results=await Promise.allSettled([repo.create(w,intent,race),service.reset(f.owner,w.id,race)]);
+      expect(results[1].status).toBe('fulfilled');const attempt=await repo.byKey(w.id,race);
+      if(attempt)expect(attempt).toMatchObject({status:'rejected',failureCode:'USER_CANCELLED'});
+      else await expect(repo.create(w,intent,race)).rejects.toThrow('PAYMENT_PREPARATION_RESET');
+    }
+    expect((await pool.query('SELECT attempt_id FROM wallet_relayer_locks')).rows.every(row=>row.attempt_id===null)).toBe(true);
+  });
+
 });

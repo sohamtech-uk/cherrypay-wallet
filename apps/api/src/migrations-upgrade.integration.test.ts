@@ -63,7 +63,7 @@ describe.skipIf(process.env.RUN_DB_INTEGRATION !== '1')('deployed UUID database 
       await expect(db.query("INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES('Alice@example.com','invalid-normalization')")).rejects.toMatchObject({ code: '23514' });
       await db.query("DELETE FROM wallet_accounts WHERE id='alice@example.com'");
       expect((await db.query('SELECT * FROM wallet_email_verifications')).rows).toEqual([]);
-      expect((await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name')).rows.map(r => r.name)).toEqual([...deployedMigrations.map(([name]) => name), '004_email_identity.sql', '004_payroll_runs.sql', '009_wallet_deployment_jobs.sql', '010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql']);
+      expect((await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name')).rows.map(r => r.name)).toEqual([...deployedMigrations.map(([name]) => name), '004_email_identity.sql', '004_payroll_runs.sql', '009_wallet_deployment_jobs.sql', '010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql','014_cancelled_preparations.sql']);
 
       // Unknown checksum changes must still fail closed, not get silently blessed.
       await db.query("UPDATE wallet_schema_migrations SET sha256='tampered' WHERE name='001_wallet_identity.sql'");

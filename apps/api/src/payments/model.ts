@@ -46,7 +46,7 @@ export interface Chain {
   submit(signedXdr: string): Promise<void>;
   outcome(hash: string): Promise<Outcome>;
   balance(address: string): Promise<{ amountStroops: string; ledger: number }>;
-  events(cursor: string | undefined, startLedger: number): Promise<{ events: TransferEvent[]; cursor: string }>;
+  events(cursor: string | undefined, startLedger: number, address?: string): Promise<{ events: TransferEvent[]; cursor: string }>;
 }
 export interface PolicyReader {
   // Only a trusted adapter may establish spending readiness from current on-chain rules.

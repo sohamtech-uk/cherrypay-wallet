@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { Keypair, rpc } from '@stellar/stellar-sdk';
 import { db } from '../store.js';
 import { TESTNET_RPC_URL } from '../config.js';
-import { PASSPHRASE, requireThat, spendingReady, type PolicyReader } from '../payments/model.js';
+import { PASSPHRASE, requireThat, spendingReady, type Chain, type PolicyReader } from '../payments/model.js';
 import { PostgresPaymentRepository } from '../payments/postgres-repository.js';
 import { PaymentService } from '../payments/service.js';
 import { StellarChain } from '../payments/stellar.js';
@@ -79,6 +79,28 @@ export async function paymentMonitorStart(pool:Pool,latestLedger:()=>Promise<num
   return start;
 }
 
+/** Each C-wallet starts at its own confirmed deployment, with a durable cursor.
+ * Existing global and per-wallet cursors are retained; no latest-ledger reset. */
+export async function monitorPrimaryWallets(pool:Pool,chain:Chain) {
+  const {rows}=await pool.query(`SELECT w.address,d.confirmed_ledger FROM wallet_onchain_accounts w
+    JOIN wallet_deployment_jobs d ON d.account_id=w.owner AND d.contract_address=w.address
+    WHERE w.id=w.address AND d.status='CONFIRMED' AND d.binding_verified_at IS NOT NULL ORDER BY w.id`);
+  let failed=false;
+  for(const row of rows) {
+    try {
+      const id='TESTNET:native_xlm_sac:wallet:'+row.address;
+      const saved=await pool.query(`INSERT INTO wallet_monitor_cursors(id,start_ledger) VALUES($1,$2)
+        ON CONFLICT(id) DO UPDATE SET start_ledger=COALESCE(wallet_monitor_cursors.start_ledger,EXCLUDED.start_ledger) RETURNING start_ledger`,[id,row.confirmed_ledger]);
+      const start=Number(saved.rows[0].start_ledger);requireThat(Number.isSafeInteger(start)&&start>0,'INVALID_MONITOR_START_LEDGER');
+      const store=new PostgresPaymentRepository(pool,id),cursor=await store.cursor();
+      const page=await chain.events(cursor,start,row.address);
+      await store.ingest(page.events,cursor,page.cursor);
+      const balance=await chain.balance(row.address);await store.setBalance(row.address,balance.amountStroops,balance.ledger);
+    }catch{failed=true;} // One unavailable wallet must not block the others.
+  }
+  requireThat(!failed,'WALLET_MONITOR_RETRY_REQUIRED');
+}
+
 export async function configuredPrimaryPayments(env:NodeJS.ProcessEnv,deployments:AutomaticDeploymentService|undefined) {
   requireThat(env.WALLET_PRIMARY_PAYMENTS_ENABLED===undefined || ['true','false'].includes(env.WALLET_PRIMARY_PAYMENTS_ENABLED),'INVALID_PRIMARY_PAYMENT_FLAG');
   if(env.WALLET_PRIMARY_PAYMENTS_ENABLED!=='true')return;
@@ -93,7 +115,8 @@ export async function configuredPrimaryPayments(env:NodeJS.ProcessEnv,deployment
   const codec=new PinnedAccountAdapter(server,address=>registry.resolve(address));
   const store=new PostgresPaymentRepository();
   const start=await paymentMonitorStart(db,async()=>(await server.getLatestLedger()).sequence);
-  const service=new PaymentService(store,new StellarChain(server,key),codec,start,()=>registry.sync(codec));
+  const chain=new StellarChain(server,key);
+  const service=new PaymentService(store,chain,codec,start,()=>registry.sync(codec),()=>monitorPrimaryWallets(db,chain));
   deployments.paymentAccess=async owner=>{
     const walletId=await registry.ensure(owner,codec);
     return walletId ? {spendingEnabled:true,walletId} : {spendingEnabled:false};
