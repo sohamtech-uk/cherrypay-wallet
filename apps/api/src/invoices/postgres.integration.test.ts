@@ -134,6 +134,21 @@ describe.skipIf(process.env.RUN_DB_INTEGRATION!=='1')('invoice reconciliation Po
     expect((await invoices.get(merchant.owner,merchant.id,r.id)).receipts[0].late).toBe(true);
     await expect(invoices.allocate(merchant.owner,merchant.id,r.id,otherEvent.id,'Second late receipt refused')).rejects.toThrow('INVOICE_ALREADY_PAID');
   });
+  it('never treats known Friendbot funding as an invoice payment or an unmatched customer receipt',async()=>{
+    const r=await create(),hash=randomBytes(32).toString('hex');
+    await pool.query("INSERT INTO wallet_deployment_jobs(account_id,status,contract_address,transaction_hash) VALUES($1,'CONFIRMED',$2,$3)",
+      [merchant.owner,merchant.address,randomBytes(32).toString('hex')]);
+    await pool.query("INSERT INTO wallet_friendbot_funding(account_id,address,transaction_hash) VALUES($1,$2,$3)",
+      [merchant.owner,merchant.address,hash]);
+    const grant=await receipt(r.amountStroops,merchant.address,hash);
+    expect((await invoices.unmatched(merchant.owner,merchant.id)).items.map(x=>x.eventId)).not.toContain(grant.id);
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,grant.id,'This is only a Testnet funding grant')).rejects.toThrow('SYSTEM_FUNDING_CANNOT_SETTLE_INVOICE');
+    await expect(pool.query(`INSERT INTO wallet_invoice_allocations(event_id,request_id,method,actor,note,created_at)
+      VALUES($1,$2,'manual','bypass','attempted grant allocation',$3)`,[grant.id,r.id,Date.now()])).rejects.toThrow('SYSTEM_FUNDING_CANNOT_SETTLE_INVOICE');
+    expect((await invoices.checkout(r.id)).status).toBe('unpaid');
+    await pool.query('DELETE FROM wallet_friendbot_funding WHERE account_id=$1',[merchant.owner]);
+    await pool.query('DELETE FROM wallet_deployment_jobs WHERE account_id=$1',[merchant.owner]);
+  });
   it('prevents receipt theft across merchants and simultaneous allocation to different invoices',async()=>{
     const r=await create(),s=await create(),wrong=await receipt('1',other.address);
     await expect(invoices.allocate(merchant.owner,merchant.id,r.id,wrong.id,'wrong recipient')).rejects.toThrow('RECEIPT_DOES_NOT_MATCH_INVOICE');
