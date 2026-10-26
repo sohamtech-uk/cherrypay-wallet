@@ -164,7 +164,7 @@ it('resolves an opted-in email before preparing, shows exact fees, and requires 
   await user.type(screen.getByLabelText('Exact amount (XLM)'),'2');
   await user.click(screen.getByRole('button',{name:'Preview payment'}));
   expect(adapter.resolveRecipientEmail).toHaveBeenCalledWith('receiver@example.com');
-  expect(adapter.prepare).toHaveBeenCalledWith(expect.objectContaining({destination:verifiedAddress,amountStroops:'20000000'}),expect.any(String));
+  expect(adapter.prepare).toHaveBeenCalledWith(expect.objectContaining({destination:verifiedAddress,amountStroops:'20000000'}),undefined);
   expect(screen.getByText(/receiver@example.com · mailbox verified/)).toBeTruthy();
   expect(screen.getByText('Maximum Stellar network fee allowance')).toBeTruthy();
   expect(screen.getByText('Your maximum network fee contribution')).toBeTruthy();
