@@ -31,7 +31,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   },30_000);
   it('applies identity and payment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_email_identity.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql','014_cancelled_preparations.sql', '015_invoice_requests.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_email_identity.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql','014_cancelled_preparations.sql', '015_invoice_requests.sql','016_verified_email_directory.sql']);
   });
   it('persists and revokes hashed sessions',async () => {
     const {token}=await createSession(account.id);
