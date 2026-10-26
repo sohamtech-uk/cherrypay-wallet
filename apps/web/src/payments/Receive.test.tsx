@@ -4,13 +4,14 @@ import {act,cleanup,render,screen} from '@testing-library/react';
 import {MemoryRouter} from 'react-router-dom';
 import {StrKey} from '@stellar/stellar-sdk';
 import {PaymentContext} from './context';
+import {WalletAccountContext,type WalletAccount} from './account-context';
 import {Receive} from './Receive';
 import {NETWORK,type PaymentAdapter,type Attempt} from './model';
 const address=StrKey.encodeContract(Buffer.alloc(32,1)),sender=StrKey.encodeEd25519PublicKey(Buffer.alloc(32,2));
 const incoming:Attempt={id:'receipt',network:NETWORK,from:sender,destination:address,amountStroops:'10000000',feeStroops:'0',feeKnown:false,createdAt:'2026-10-26T00:00:00Z',status:'confirmed',verified:true,transactionHash:'a'.repeat(64)};
 const balance=()=>({amountStroops:'100000000000',ledger:500,updatedAt:Date.now()});
 function adapter():PaymentAdapter{return {network:NETWORK,address,supportedDestinations:['contract'],receive:{address,route:'contract',instructions:'Use native Testnet XLM SAC transfers.'},getBalance:vi.fn(async()=>balance()),listTransfers:vi.fn(async()=>({items:[]})),prepare:vi.fn(),createAttempt:vi.fn(),approve:vi.fn(),getAttempt:vi.fn(),getAttemptByKey:vi.fn(),listAttempts:vi.fn()};}
-function mount(a:PaymentAdapter){return render(<MemoryRouter><PaymentContext.Provider value={a}><Receive/></PaymentContext.Provider></MemoryRouter>);}
+function mount(a:PaymentAdapter|null,account:WalletAccount|null=null){return render(<MemoryRouter><WalletAccountContext.Provider value={account}><PaymentContext.Provider value={a}><Receive/></PaymentContext.Provider></WalletAccountContext.Provider></MemoryRouter>);}
 afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks();});
 it('shows the C-address and receives from an external G-account without requesting a signature',async()=>{
  const a=adapter();vi.mocked(a.listTransfers!).mockResolvedValue({items:[incoming]});mount(a);
@@ -34,4 +35,24 @@ it.each(['unverified','foreign-wallet','mainnet'])('does not publish a %s receip
 it('does not imply zero balance after an RPC failure and keeps the supported receive address usable',async()=>{
  const a=adapter();vi.mocked(a.getBalance!).mockRejectedValue(Error('RPC unavailable'));mount(a);await screen.findByText('Balance could not be refreshed. Check again.');
  expect(screen.queryByText('0.0000000 XLM')).toBeNull();expect(screen.getByLabelText('Your supported Testnet destination')).toHaveProperty('value',address);
+});
+
+
+it('shows the verified deployed C-address even when spending/payment adapter is not connected',()=>{
+  const account:WalletAccount={
+    accountId:'alice@example.com',authenticated:true,connected:false,credentialCount:1,canSign:false,busy:false,error:'',notice:'',
+    deployment:{status:'CONFIRMED',enabled:true,spendingEnabled:false,address,transactionHash:'b'.repeat(64),ledger:777},
+    deploymentStatus:'CONFIRMED',wallets:[],addPasskey:vi.fn(async()=>{}),refreshDeployment:vi.fn(async()=>{}),fundTestnet:vi.fn(async()=>{}),signOut:vi.fn(async()=>{})
+  };
+  mount(null,account);
+  expect(screen.getByLabelText('Your supported Testnet destination')).toHaveProperty('value',address);
+  expect(screen.getByTitle('Stellar Testnet destination address')).toBeTruthy();
+  expect(screen.getByText(/Receiving does not require outgoing payment activation|verified receive address is available/)).toBeTruthy();
+  expect(screen.queryByText('Receive route not connected')).toBeNull();
+});
+
+it('asks for passkey sign-in instead of claiming the receive route is disconnected when no session is active',()=>{
+  mount(null,null);
+  expect(screen.getByText('Sign in to view your receive address')).toBeTruthy();
+  expect(screen.queryByText('Receive route not connected')).toBeNull();
 });
