@@ -34,9 +34,9 @@ function stub(available = true) {
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
-it('renders the public reference without wallet authentication and distinguishes runtime from route availability', async () => {
+it.each(['/developers', '/api-docs'])('renders the public reference at %s without wallet authentication and distinguishes runtime from route availability', async (route) => {
   const fetcher = stub();
-  render(<MemoryRouter initialEntries={['/developers']}><App/></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[route]}><App/></MemoryRouter>);
   expect(await screen.findByRole('heading', {name: 'Cherry Wallet API'})).toBeTruthy();
   expect(screen.queryByRole('heading', {name: 'Welcome to Cherry Wallet'})).toBeNull();
   expect(await screen.findByText('Create payment attempt')).toBeTruthy();
