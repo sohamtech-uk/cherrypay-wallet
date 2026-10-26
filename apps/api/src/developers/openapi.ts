@@ -56,7 +56,7 @@ const identity = {
   }
 };
 const deployment = {
-  '/api/v1/smart-account/capabilities': { get: read('Read smart-account capability gates', 'Testnet contract and verifier metadata. Capability flags are not proof that a user can spend or recover.') },
+  '/api/v1/smart-account/capabilities': { get: read('Read smart-account capability gates', 'Testnet contract and verifier metadata. capabilityScope is runtime: spendingEnabled reports the same payment service availability as /health.walletPaymentsEnabled. walletVerificationRequired remains true; individual wallet ownership, on-chain signer and payment authorization checks still apply. These flags are not proof of a completed payment or independent recovery.') },
   '/api/v1/smart-account/relayer': { get: read('Read public Testnet relayer information', 'Returns non-secret relayer status and public key when configured.') },
   '/api/v1/smart-account/deployment': {
     get: read('Check authenticated smart-wallet deployment', 'Owner-scoped deployment status, verified contract address and signer binding when confirmed.', true),

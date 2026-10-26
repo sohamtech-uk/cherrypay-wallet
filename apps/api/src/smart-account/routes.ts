@@ -10,7 +10,7 @@ import type { AutomaticDeploymentService } from './automatic-deployment.js';
 
 /** Deployment is opt-in; payment authority and independent recovery remain separate. */
 export async function registerSmartAccountRoutes(app: FastifyInstance, options: {
-  deployments?: AutomaticDeploymentService; origin?: string;
+  deployments?: AutomaticDeploymentService; paymentsEnabled?: boolean; origin?: string;
 } = {}) {
   const emptyBody = { type: 'object', additionalProperties: false };
   app.post('/api/v1/smart-account/deployment', { schema: { body: emptyBody } }, async (request, reply) => {
@@ -79,8 +79,10 @@ export async function registerSmartAccountRoutes(app: FastifyInstance, options: 
       webauthnVerifierAddress: TESTNET_V080.verifierAddress, webauthnVerifierWasmHash: TESTNET_V080.verifierWasmHash,
       asset: 'XLM', supportedAssets: ['XLM'], supportsSwaps: false, supportsFiatConversion: false,
       securityStatus: 'PINNED_V080_ONCHAIN_ATTESTATION_REQUIRED',
-      deploymentEnabled: !!options.deployments, spendingEnabled: false, recoveryEnabled: false,
-      reason: options.deployments ? 'PRIMARY_DEPLOYMENT_ENABLED_BACKUP_RECOVERY_REQUIRED' : 'WALLET_DEPLOYMENT_AND_INDEPENDENT_RECOVERY_NOT_VERIFIED',
+      // Runtime availability is not an individual wallet's authorization or recovery evidence.
+      capabilityScope: 'runtime', walletVerificationRequired: true,
+      deploymentEnabled: !!options.deployments, spendingEnabled: options.paymentsEnabled === true, recoveryEnabled: false,
+      reason: options.paymentsEnabled === true ? 'PAYMENT_SERVICE_ENABLED_WALLET_VERIFICATION_REQUIRED' : options.deployments ? 'PRIMARY_DEPLOYMENT_ENABLED_BACKUP_RECOVERY_REQUIRED' : 'WALLET_DEPLOYMENT_AND_INDEPENDENT_RECOVERY_NOT_VERIFIED',
     };
   });
   app.get('/api/v1/smart-account/:address/status', {
