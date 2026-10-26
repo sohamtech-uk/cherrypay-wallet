@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Copy, Eye, EyeOff, KeyRound, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Wallet } from 'lucide-react';
 import { usePayments } from './context';
@@ -12,6 +12,11 @@ export function Profile() {
   const [copyMessage, setCopyMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [emailCode, setEmailCode] = useState('');
+  const [emailFeedback, setEmailFeedback] = useState<{message:string;error:boolean;request?:boolean}>();
+  const [emailBusy, setEmailBusy] = useState(false);
+  const emailLock = useRef(false);
+  const emailFeedbackRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (emailFeedback) emailFeedbackRef.current?.focus(); }, [emailFeedback]);
   if (!account?.authenticated) {
     return <div className="profile-page"><div className="heading"><div><span className="eyebrow">ACCOUNT</span><h1>Profile & settings</h1></div></div>
       <section className="card payment-screen"><h2>Sign in to your account</h2><p>Your wallet profile and security settings are available only after email and passkey authentication.</p><Link className="secondary-button" to="/">Go to wallet sign-in</Link></section></div>;
@@ -23,6 +28,13 @@ export function Profile() {
     setActionMessage('');
     try { await operation(); }
     catch { setActionMessage('The action could not be completed. Check your connection and try again.'); }
+  }
+  async function runEmail(operation: () => Promise<void>, success: string, request = false) {
+    if (emailLock.current) return;
+    emailLock.current = true; setEmailBusy(true); setEmailFeedback(undefined);
+    try { await operation(); setEmailFeedback({message:success,error:false,request}); }
+    catch (error) { setEmailFeedback({message:error instanceof Error ? error.message : 'Email verification could not complete. Check your connection and try again.',error:true}); }
+    finally { emailLock.current = false; setEmailBusy(false); }
   }
   async function copyAddress() {
     if (!address) return;
@@ -41,17 +53,18 @@ export function Profile() {
         <h2>Receive by verified email</h2>
         <p>Friends or customers can enter your email instead of copying your wallet address. This is optional and uses Stellar Testnet XLM only.</p>
         <p role="status">Mailbox ownership: <strong>{account.emailVerified ? 'Verified' : 'Not verified'}</strong>. Wallet address binding: <strong>{account.deployment?.spendingEnabled ? 'Verified' : 'Not ready'}</strong>.</p>
+        {emailFeedback && <p ref={emailFeedbackRef} tabIndex={-1} role={emailFeedback.error ? 'alert' : 'status'} className={`email-verification-feedback${emailFeedback.error ? ' error' : ''}`}>{emailFeedback.request && account.emailVerified ? 'Your email is already verified.' : emailFeedback.message}</p>}
         {!account.emailVerified && <>
-          <button type="button" disabled={account.busy} onClick={() => void run(account.requestEmailVerification!)}>Send email verification code</button>
-          <form onSubmit={e => { e.preventDefault(); void run(async () => { await account.confirmEmailVerification!(emailCode); setEmailCode(''); }); }}>
+          <button type="button" disabled={account.busy || emailBusy} onClick={() => void runEmail(account.requestEmailVerification!, 'The email provider accepted your verification request. Check your inbox and junk folder. Your 8-digit code expires in 15 minutes. If it does not arrive, try sending a new code after a minute.', true)}>{emailBusy ? 'Working on email verification…' : 'Send email verification code'}</button>
+          <form onSubmit={e => { e.preventDefault(); void runEmail(async () => { await account.confirmEmailVerification!(emailCode); setEmailCode(''); }, 'Email verified. You can now choose whether people can pay your email.'); }}>
             <label htmlFor="profile-email-code">8-digit email verification code</label>
             <input id="profile-email-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} required value={emailCode} onChange={e => setEmailCode(e.target.value)}/>
-            <button type="submit" disabled={account.busy || !/^[0-9]{8}$/.test(emailCode)}>Verify email</button>
+            <button type="submit" disabled={account.busy || emailBusy || !/^[0-9]{8}$/.test(emailCode)}>Verify email</button>
           </form>
         </>}
-        {account.emailVerified && <button type="button" disabled={account.busy || (!account.emailPaymentsEnabled && !account.deployment?.spendingEnabled)}
+        {account.emailVerified && <button type="button" disabled={account.busy || emailBusy || (!account.emailPaymentsEnabled && !account.deployment?.spendingEnabled)}
           aria-pressed={!!account.emailPaymentsEnabled}
-          onClick={() => void run(() => account.setEmailPaymentsEnabled!(!account.emailPaymentsEnabled))}>
+          onClick={() => void runEmail(() => account.setEmailPaymentsEnabled!(!account.emailPaymentsEnabled), account.emailPaymentsEnabled ? 'Pay-by-email discovery is now off.' : 'People can now pay your verified email.')}>
           {account.emailPaymentsEnabled ? 'Turn off pay-by-email discovery' : 'Allow people to pay my verified email'}
         </button>}
         <p>{account.emailPaymentsEnabled ? 'Your email can be resolved to your current Testnet smart-wallet address by signed-in Cherry Wallet users.' : 'Your email is private and cannot be looked up by payers until you opt in.'} Mailbox verification does not verify your legal identity or provide passkey recovery.</p>

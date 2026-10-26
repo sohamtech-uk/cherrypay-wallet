@@ -134,3 +134,10 @@ it('does not treat reset network failure or HTTP not-found as permission to disc
   api.mockRejectedValue(error);await expect(adapter.resetAttempt!('unresolved-reset-key')).rejects.toThrow('Reset could not be confirmed');
  }
 });
+
+
+it('distinguishes email delivery failures from unavailable payment services without retrying', async () => {
+  const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({error:'EMAIL_DELIVERY_UNAVAILABLE'}), {status:503}));
+  await expect(apiClient(()=>'session', transport)('wallet/email-verification/request', {})).rejects.toThrow('We could not send your verification email');
+  expect(transport).toHaveBeenCalledTimes(1);
+});

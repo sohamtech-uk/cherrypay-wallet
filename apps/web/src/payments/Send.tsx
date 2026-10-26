@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Mail, Wallet } from 'lucide-react';
 import { usePayments } from './context';
 import { checkQuote, destinationError, explorerLink, NETWORK, paymentBreakdown, statusLabel, stroops, xlm, type Attempt, type Quote, type Invoice, type ResolvedRecipient } from './model';
 
@@ -20,7 +21,8 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
   }, [storageKey]);
   const [destination, setDestination] = useState(request?.destination ?? params.get('to') ?? '');
   const [amount, setAmount] = useState(request?xlm(request.remainingStroops):'');
-  const [recipientMode, setRecipientMode] = useState<'address'|'email'>('address');
+  const [detailsStep, setDetailsStep] = useState<'method'|'recipient'>(request || params.get('to') ? 'recipient' : 'method');
+  const [recipientMode, setRecipientMode] = useState<'address'|'email'|undefined>(request || params.get('to') ? 'address' : undefined);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [resolvedRecipient, setResolvedRecipient] = useState<ResolvedRecipient>();
   const [quote, setQuote] = useState<Quote>();
@@ -31,6 +33,9 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
   const alert = useRef<HTMLParagraphElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const statusHeading = useRef<HTMLHeadingElement>(null);
+  const methodHeading = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(detailsStep);
+  const previousKey = useRef(key);
   const destinationInput = useRef<HTMLInputElement>(null);
   const recipientEmailInput = useRef<HTMLInputElement>(null);
   const previousQuote = useRef<string | undefined>(undefined);
@@ -38,13 +43,16 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
     if (error) alert.current?.focus();
     else if (quote && previousQuote.current !== quote.id) reviewHeading.current?.focus();
     else if (!quote && previousQuote.current)
-      (key ? statusHeading.current : recipientMode === 'email' ? recipientEmailInput.current : destinationInput.current)?.focus();
+      (key ? statusHeading.current : detailsStep === 'method' ? methodHeading.current : recipientMode === 'email' ? recipientEmailInput.current : destinationInput.current)?.focus();
+    else if (previousStep.current !== detailsStep || (previousKey.current && !key))
+      (detailsStep === 'method' ? methodHeading.current : recipientMode === 'email' ? recipientEmailInput.current : destinationInput.current)?.focus();
     previousQuote.current = quote?.id;
-  }, [quote, key, error, recipientMode]);
+    previousStep.current = detailsStep;
+    previousKey.current = key;
+  }, [quote, key, error, recipientMode, detailsStep]);
   const [accepted, setAccepted] = useState(false);
   useEffect(()=>{if(request&&!quote&&!key){setDestination(request.destination);setAmount(xlm(request.remainingStroops));}},[request,quote,key]);
-  // Legacy partially-paid invoices are also closed to further charges. A new
-  // exact invoice is required for an additional payment, not a reused QR.
+  // Historical partially-paid invoices are permanently closed to another checkout.
   const requestClosed=!!request&&(request.status!=='unpaid'||request.paidStroops!=='0'||request.expired||request.expiresAt<=Date.now()||request.remainingStroops==='0'||checkoutUnavailable);
   const destinationFeedback = recipientMode === 'address' && destination ? destinationError(destination.trim(), adapter.supportedDestinations) : '';
   const intent = (resolvedAddress?: string) => {
@@ -88,13 +96,37 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
     const timer = window.setInterval(() => void poll(), 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, [adapter, key, polling, validateAttempt]);
+  function resetDetails() {
+    setDetailsStep(request ? 'recipient' : 'method');
+    setRecipientMode(request ? 'address' : undefined);
+    setDestination(request?.destination ?? '');
+    setAmount(request ? xlm(request.remainingStroops) : '');
+    setRecipientEmail(''); setResolvedRecipient(undefined); setAccepted(false);
+  }
   const terminal = attempt && (attempt.status === 'failed' || attempt.status === 'rejected' || (attempt.status === 'confirmed' && attempt.verified));
   return <section className="card payment-screen send-screen"><span className="eyebrow">WALLET PAYMENT</span><h1>Send XLM</h1>
     <p>Choose a recipient and amount. Review the fee before approving.</p><ol className="payment-steps" aria-label="Payment progress"><li aria-current={!quote && !key ? 'step' : undefined}>1 · Details</li><li aria-current={quote ? 'step' : undefined}>2 · Review</li><li aria-current={key && !quote ? 'step' : undefined}>3 · Status</li></ol>
     {request&&<p>Invoice: <strong>{request.invoiceReference}</strong> · {request.merchantName}. <Link to="/send">Manage another saved payment</Link></p>}
     {quote?.paymentRequestId&&!request&&<p>Linked invoice: <Link to={`/pay/${quote.paymentRequestId}`}>View invoice checkout</Link></p>}
     <p ref={alert} tabIndex={-1} role="alert" className="error">{error}</p>
-    {!key && <form onSubmit={e => { e.preventDefault(); void run(async () => { let recipientAddress: string | undefined;
+    {!key && !quote && detailsStep === 'method' && <section className="payment-method-picker" aria-labelledby="payment-method-heading">
+      <h2 id="payment-method-heading" ref={methodHeading} tabIndex={-1}>How do you want to pay?</h2>
+      <p>Choose how to find your recipient. You’ll enter the amount next.</p>
+      <div className="payment-method-grid">
+        {(['address', 'email'] as const).map(method => <button key={method} type="button"
+          className="secondary-button payment-method-card" aria-label={`Pay by ${method}`} aria-describedby={`pay-by-${method}-help`}
+          aria-pressed={recipientMode === method} disabled={busy || (method === 'email' && !adapter.resolveRecipientEmail)}
+          onClick={() => { if (recipientMode !== method) { setDestination(''); setRecipientEmail(''); setResolvedRecipient(undefined); } setRecipientMode(method); setError(''); }}>
+          {method === 'address' ? <Wallet size={24} aria-hidden="true"/> : <Mail size={24} aria-hidden="true"/>}
+          <strong>Pay by {method}</strong>
+          <span id={`pay-by-${method}-help`}>{method === 'address' ? 'Use a Stellar wallet address.' : adapter.resolveRecipientEmail ? 'Use a verified email that accepts payments.' : 'Email payments are unavailable for this connection.'}</span>
+          {recipientMode === method && <span className="payment-method-selected"><CheckCircle2 size={16} aria-hidden="true"/> Selected</span>}
+        </button>)}
+      </div>
+      <button className="payment-method-next" type="button" disabled={!recipientMode || busy}
+        onClick={() => setDetailsStep('recipient')}>Next</button>
+    </section>}
+    {!key && detailsStep === 'recipient' && <form onSubmit={e => { e.preventDefault(); void run(async () => { let recipientAddress: string | undefined;
       if (recipientMode === 'email' && !request) {
         if (!adapter.resolveRecipientEmail) throw Error('Email recipient lookup is unavailable.');
         const match = await adapter.resolveRecipientEmail(recipientEmail);
@@ -108,10 +140,9 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
       }
       const preview = await adapter.prepare(requested, previewKey); checkQuote(preview, requested); setQuote(preview); setAccepted(false); }); }}>
       <fieldset disabled={busy || !!quote || requestClosed}><legend>Payment details</legend>
-        {!request && adapter.resolveRecipientEmail && <fieldset className="recipient-methods"><legend>How do you want to identify the recipient?</legend>
-          <label><input type="radio" name="recipient-method" checked={recipientMode==='address'} onChange={() => { setRecipientMode('address'); setResolvedRecipient(undefined); setDestination(''); }}/> Stellar address</label>
-          <label><input type="radio" name="recipient-method" checked={recipientMode==='email'} onChange={() => { setRecipientMode('email'); setResolvedRecipient(undefined); setDestination(''); }}/> Verified email</label>
-        </fieldset>}
+        {!request && <div className="payment-method-summary"><h2>Pay by {recipientMode}</h2>
+          {!quote && <button type="button" className="secondary-button" onClick={() => { setError(''); setDetailsStep('method'); }}>Change payment method</button>}
+        </div>}
         {recipientMode === 'email' && !request ? <>
           <label htmlFor="recipient-email">Recipient email</label>
           <input ref={recipientEmailInput} id="recipient-email" type="email" autoComplete="off" maxLength={254} required value={recipientEmail} onChange={e => { setRecipientEmail(e.target.value); setResolvedRecipient(undefined); }} aria-describedby="recipient-email-help"/>
@@ -124,7 +155,7 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
         <label htmlFor="amount">Exact amount (XLM)</label><input id="amount" readOnly={!!request} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} aria-describedby="amount-help" required/>
         <p id="amount-help">XLM only · up to 7 decimal places.</p>
       </fieldset>
-      {!quote && <button disabled={busy || requestClosed || !!request?.paymentPending} type="submit">{busy ? 'Loading fee preview…' : 'Preview payment'}</button>}
+      {!quote && <button disabled={busy || requestClosed || !!request?.paymentPending} type="submit">{busy ? 'Loading fee preview…' : 'Review payment'}</button>}
     </form>}
     {quote && (!key || adapter.persistentPreview) && <section aria-label="Review payment"><h2 ref={reviewHeading} tabIndex={-1}>Review and approve</h2><dl><dt>Network</dt><dd>Stellar Testnet</dd><dt>From</dt><dd>{quote.from}</dd>
       {resolvedRecipient && <><dt>Recipient email</dt><dd>{resolvedRecipient.email} · mailbox verified and wallet bound (not legal identity verified)</dd></>}
@@ -165,11 +196,11 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
       {!terminal && key !== 'storage-unavailable' && adapter.resetAttempt && <button className="secondary-button" disabled={busy} onClick={()=>void run(async()=>{
         await adapter.resetAttempt!(key);
         if(localStorage.getItem(storageKey)!==key)throw Error('The saved payment changed in another tab. Check its status before resetting.');
-        localStorage.removeItem(storageKey);setKey('');setAttempt(undefined);setQuote(undefined);setDestination('');setAmount('');setResolvedRecipient(undefined);setAccepted(false);
+        localStorage.removeItem(storageKey);setKey('');setAttempt(undefined);setQuote(undefined);resetDetails();
       })}>Reset and change recipient</button>}
-      {attempt?.status === 'awaiting_approval' && adapter.getQuote && <button disabled={busy} onClick={() => void run(async () => { const recovered = await adapter.getQuote!(attempt.id); setDestination(recovered.destination); setAmount(xlm(recovered.amountStroops)); setQuote(recovered); setAccepted(false); })}>Review existing payment</button>}
+      {attempt?.status === 'awaiting_approval' && adapter.getQuote && <button disabled={busy} onClick={() => void run(async () => { const recovered = await adapter.getQuote!(attempt.id); setDetailsStep('recipient'); setRecipientMode(mode => mode ?? 'address'); setDestination(recovered.destination); setAmount(xlm(recovered.amountStroops)); setQuote(recovered); setAccepted(false); })}>Review existing payment</button>}
       {attempt?.status === 'awaiting_approval' && adapter.cancelAttempt && <button disabled={busy} onClick={() => void run(async () => { setAttempt(validateAttempt(await adapter.cancelAttempt!(attempt.id))); setQuote(undefined); })}>Cancel unsigned payment</button>}
-      {terminal && <button className="secondary-button" disabled={busy} onClick={() => { try { localStorage.removeItem(storageKey); setKey(''); setAttempt(undefined); setQuote(undefined); setAccepted(false); setAmount(''); setRecipientEmail(''); setResolvedRecipient(undefined); setError(''); } catch { setError('Unable to clear recovery record. Enable browser storage and reload.'); } }}>Start a new payment</button>}</div>
+      {terminal && <button className="secondary-button" disabled={busy} onClick={() => { try { localStorage.removeItem(storageKey); setKey(''); setAttempt(undefined); setQuote(undefined); resetDetails(); setError(''); } catch { setError('Unable to clear recovery record. Enable browser storage and reload.'); } }}>Start a new payment</button>}</div>
     </section>}
   </section>;
 }

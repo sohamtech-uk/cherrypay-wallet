@@ -49,7 +49,14 @@ export async function registerRecipientDirectoryRoutes(app: FastifyInstance,
       requireThat(identity && identity.email === email, 'EMAIL_ACCOUNT_REQUIRED', 409);
       if (identity.email_verified_at) return { status:'already_verified' };
       const code = await createEmailVerification(owner);
-      await sendEmail(email,code);
+      try { await sendEmail(email,code); }
+      catch (error) {
+        // Log only allowlisted reasons: never the exception, recipient, code or provider response.
+        const known = ['AZURE_MAIL_CONFIGURATION_INVALID','AZURE_MAIL_TOKEN_FAILED','AZURE_MAIL_TOKEN_INVALID','AZURE_MAIL_SEND_FAILED'];
+        const reason = error instanceof Error && known.includes(error.message) ? error.message : 'MAIL_PROVIDER_UNAVAILABLE';
+        req.log.warn({ code:'EMAIL_DELIVERY_UNAVAILABLE', reason }, 'Verification email was not accepted by provider');
+        throw response('EMAIL_DELIVERY_UNAVAILABLE',503);
+      }
       return { status: 'sent', expiresInSeconds: 900 };
     }));
   app.post(path + '/email-verification/confirm', {

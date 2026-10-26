@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { StrKey } from '@stellar/stellar-sdk';
@@ -93,4 +93,36 @@ it('requires mailbox verification and explicit consent before exposing email dis
   </PaymentContext.Provider></MemoryRouter>);
   await user.click(screen.getByRole('button',{name:'Allow people to pay my verified email'}));
   expect(optIn).toHaveBeenCalledWith(true);
+});
+
+
+it('shows and focuses email delivery failures beside the verification controls', async () => {
+  const request = vi.fn().mockRejectedValue(new Error('We could not send your verification email. Please try again later.'));
+  mount(account({requestEmailVerification:request,confirmEmailVerification:vi.fn(),setEmailPaymentsEnabled:vi.fn()}),adapter());
+  await userEvent.click(screen.getByRole('button',{name:'Send email verification code'}));
+  const emailSection = screen.getByRole('region',{name:'Receive payments by email'});
+  const error = within(emailSection).getByRole('alert');
+  expect(error.textContent).toContain('We could not send your verification email');
+  expect(document.activeElement).toBe(error);
+  expect(within(emailSection).queryByText(/provider accepted/)).toBeNull();
+  expect(screen.getByRole('button',{name:'Send email verification code'})).toHaveProperty('disabled',false);
+});
+
+it('acknowledges provider acceptance inline without claiming delivery or mailbox verification', async () => {
+  mount(account({requestEmailVerification:vi.fn().mockResolvedValue(undefined),confirmEmailVerification:vi.fn(),setEmailPaymentsEnabled:vi.fn()}),adapter());
+  await userEvent.click(screen.getByRole('button',{name:'Send email verification code'}));
+  const emailSection = screen.getByRole('region',{name:'Receive payments by email'});
+  expect(within(emailSection).getByText(/provider accepted your verification request/)).toBeTruthy();
+  expect(within(emailSection).getByText('Not verified')).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Allow people to pay my verified email'})).toBeNull();
+});
+
+
+it('does not claim a new email was accepted when the mailbox is already verified', async () => {
+  const state=account({requestEmailVerification:vi.fn().mockResolvedValue(undefined),confirmEmailVerification:vi.fn(),setEmailPaymentsEnabled:vi.fn()});
+  const view=mount(state,adapter());
+  await userEvent.click(screen.getByRole('button',{name:'Send email verification code'}));
+  view.rerender(<MemoryRouter><PaymentContext.Provider value={adapter()}><WalletAccountContext.Provider value={{...state,emailVerified:true}}><Profile/></WalletAccountContext.Provider></PaymentContext.Provider></MemoryRouter>);
+  expect(screen.getByText('Your email is already verified.')).toBeTruthy();
+  expect(screen.queryByText(/provider accepted your verification request/)).toBeNull();
 });
