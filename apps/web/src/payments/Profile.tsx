@@ -11,6 +11,7 @@ export function Profile() {
   const [showAddress, setShowAddress] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
+  const [emailCode, setEmailCode] = useState('');
   if (!account?.authenticated) {
     return <div className="profile-page"><div className="heading"><div><span className="eyebrow">ACCOUNT</span><h1>Profile & settings</h1></div></div>
       <section className="card payment-screen"><h2>Sign in to your account</h2><p>Your wallet profile and security settings are available only after email and passkey authentication.</p><Link className="secondary-button" to="/">Go to wallet sign-in</Link></section></div>;
@@ -35,6 +36,26 @@ export function Profile() {
       <label htmlFor="profile-email">Email address / Account ID</label><input id="profile-email" value={account.accountId} readOnly/>
       <p>This email identifies your wallet account. Email changes are not currently supported.</p>
     </section>
+    {account.requestEmailVerification && account.confirmEmailVerification && account.setEmailPaymentsEnabled &&
+      <section className="card payment-screen" aria-label="Receive payments by email">
+        <h2>Receive by verified email</h2>
+        <p>Friends or customers can enter your email instead of copying your wallet address. This is optional and uses Stellar Testnet XLM only.</p>
+        <p role="status">Mailbox ownership: <strong>{account.emailVerified ? 'Verified' : 'Not verified'}</strong>. Wallet address binding: <strong>{account.deployment?.spendingEnabled ? 'Verified' : 'Not ready'}</strong>.</p>
+        {!account.emailVerified && <>
+          <button type="button" disabled={account.busy} onClick={() => void run(account.requestEmailVerification!)}>Send email verification code</button>
+          <form onSubmit={e => { e.preventDefault(); void run(async () => { await account.confirmEmailVerification!(emailCode); setEmailCode(''); }); }}>
+            <label htmlFor="profile-email-code">8-digit email verification code</label>
+            <input id="profile-email-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} required value={emailCode} onChange={e => setEmailCode(e.target.value)}/>
+            <button type="submit" disabled={account.busy || !/^[0-9]{8}$/.test(emailCode)}>Verify email</button>
+          </form>
+        </>}
+        {account.emailVerified && <button type="button" disabled={account.busy || (!account.emailPaymentsEnabled && !account.deployment?.spendingEnabled)}
+          aria-pressed={!!account.emailPaymentsEnabled}
+          onClick={() => void run(() => account.setEmailPaymentsEnabled!(!account.emailPaymentsEnabled))}>
+          {account.emailPaymentsEnabled ? 'Turn off pay-by-email discovery' : 'Allow people to pay my verified email'}
+        </button>}
+        <p>{account.emailPaymentsEnabled ? 'Your email can be resolved to your current Testnet smart-wallet address by signed-in Cherry Wallet users.' : 'Your email is private and cannot be looked up by payers until you opt in.'} Mailbox verification does not verify your legal identity or provide passkey recovery.</p>
+      </section>}
     <section className="card payment-screen" aria-label="Wallet details">
       <div className="profile-section-heading"><h2><Wallet size={20}/> Wallet details</h2><span className="wallet-pill">Stellar Testnet</span></div>
       <dl className="profile-detail-grid"><dt>Connection</dt><dd>{account.connected ? 'Connected' : 'Not ready'}</dd><dt>Wallet status</dt><dd>{account.deployment?.spendingEnabled ? 'On-chain signer verified' : account.connected ? 'Connected; signer status not verified here' : account.deploymentStatus || 'Awaiting verification'}</dd><dt>Transaction approval</dt><dd>{account.connected && account.canSign ? 'Approval mode available (requires fresh passkey)' : 'Not available'}</dd></dl>

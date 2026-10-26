@@ -9,6 +9,11 @@ export interface WalletAccount {
   authenticated: boolean;
   connected: boolean;
   credentialCount: number;
+  emailVerified?: boolean;
+  emailPaymentsEnabled?: boolean;
+  requestEmailVerification?(): Promise<void>;
+  confirmEmailVerification?(code: string): Promise<void>;
+  setEmailPaymentsEnabled?(enabled: boolean): Promise<void>;
   canSign: boolean;
   busy: boolean;
   error: string;

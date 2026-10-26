@@ -70,7 +70,7 @@ it('registers a new email with a passkey and shows wallet deployment unavailable
   await user.type(screen.getByLabelText('Email address (Account ID)'),'alice@example.com');
   await user.click(screen.getByRole('button',{name:'Continue with email'}));
   expect(await screen.findByText(/Automatic wallet creation is disabled on this server/)).toBeTruthy();
-  expect(screen.getByText('✓ Passkey verified')).toBeTruthy();
+  expect(screen.getByText('✓ Passkey account signed in (email mailbox verification is separate)')).toBeTruthy();
   expect(screen.getByText('Wallet deployment unavailable')).toBeTruthy();
   expect(screen.queryByText('Wallet connected.')).toBeNull();
   await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);

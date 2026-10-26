@@ -27,6 +27,8 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [authenticated, setAuthenticated] = useState(false);
   const [sessionVersion,setSessionVersion]=useState(0);
   const [credentialCount, setCredentialCount] = useState(0);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [emailPaymentsEnabled, setEmailPaymentsEnabledState] = useState(false);
   const [canSign, setCanSign] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -53,7 +55,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   function clearSession(message = '') {
     generation.current++; token.current = undefined; clearTimeout(expiry.current); clearTimeout(poll.current);
     openedWallet.current=undefined;
-    setAuthenticated(false); setConnected(false); setCredentialCount(0); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
+    setAuthenticated(false); setConnected(false); setCredentialCount(0); setEmailVerified(false); setEmailPaymentsEnabledState(false); setWallets([]); setWalletId(''); setDeploymentStatus(''); setDeployment(null);
     lock.current = false; setBusy(false); onConnect(null); setError(message);
   }
   async function openWallet(selected: OwnedWallet, id: number) {
@@ -119,6 +121,8 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
     setAuthenticated(true); setSessionVersion(v=>v+1); setCredentialCount(Number(session.credentialCount));
+    // Profile state is read with the private bearer token, never placed in the public adapter.
+    void refreshEmailSettings(id,owner).catch(() => { if (active(id)) { setEmailVerified(false); setEmailPaymentsEnabledState(false); } });
     if (previous && previous !== verifiedToken) {
       try { await revoke(previous); }
       catch { if (active(id)) setError('Your new session is active. Previous session logout could not be confirmed; it will expire.'); }
@@ -217,6 +221,49 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
       }
     } finally {if(generation.current===id){lock.current=false;setBusy(false);}}
   }
+  async function refreshEmailSettings(id: number, expectedAccount: string) {
+    const identity = object(await apiClient(() => token.current)('wallet/me'));
+    if (!active(id)) return;
+    if (identity.accountID !== expectedAccount || typeof identity.emailVerified !== 'boolean' || typeof identity.emailPaymentsEnabled !== 'boolean')
+      throw Error('The account profile differs from this session.');
+    setEmailVerified(identity.emailVerified);
+    setEmailPaymentsEnabledState(identity.emailPaymentsEnabled);
+  }
+  async function emailAction(operation: () => Promise<void>) {
+    const id = generation.current;
+    if (lock.current || !active(id)) throw Error('Reconnect your wallet before changing email settings.');
+    lock.current = true; setBusy(true); setError(''); setNotice('');
+    try { await operation(); }
+    catch (e) {
+      if (active(id)) setError(e instanceof Error ? e.message : 'Email directory settings are unavailable.');
+      throw e;
+    } finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
+  }
+  async function requestEmailVerification() {
+    await emailAction(async () => {
+      const value = object(await apiClient(() => token.current)('wallet/email-verification/request', {}));
+      if (value.status !== 'sent' && value.status !== 'already_verified') throw Error('Verification email could not be confirmed.');
+      if (value.status === 'already_verified') setEmailVerified(true);
+      setNotice(value.status === 'already_verified' ? 'Your email is already verified.' : 'An 8-digit verification code was sent. Check your email; it expires in 15 minutes.');
+    });
+  }
+  async function confirmEmailVerification(code: string) {
+    await emailAction(async () => {
+      if (!/^[0-9]{8}$/.test(code)) throw Error('Enter the 8-digit verification code.');
+      const result = object(await apiClient(() => token.current)('wallet/email-verification/confirm', { code }));
+      if (result.emailVerified !== true) throw Error('Could not verify your email.');
+      setEmailVerified(true); setNotice('Email verified. You can now opt in to email-based wallet payments.');
+    });
+  }
+  async function setEmailPaymentsEnabled(enabled: boolean) {
+    await emailAction(async () => {
+      const value = object(await apiClient(() => token.current)('wallet/email-directory', { enabled }));
+      if (value.emailPaymentsEnabled !== enabled || value.emailVerified !== true && enabled)
+        throw Error('Directory settings were not confirmed.');
+      setEmailPaymentsEnabledState(enabled);
+      setNotice(enabled ? 'Your verified email is discoverable by other Cherry Wallet users for Testnet payments.' : 'Email-based wallet discovery has been disabled.');
+    });
+  }
   async function disconnect() {
     const abandoned = token.current;
     clearSession(); setNotice(''); const id = generation.current;
@@ -230,13 +277,14 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
   return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
+    emailVerified, emailPaymentsEnabled, requestEmailVerification, confirmEmailVerification, setEmailPaymentsEnabled,
     addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect, ...access }}>
     {showSetup && <section className="card payment-screen wallet-connect" aria-label="Payment service connection" aria-busy={busy}>
     <h1>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h1>
     <p>{authenticated ? 'Finish setting up your wallet to start making payments.' : 'One email. One passkey. Your own wallet for sending and receiving XLM.'}</p>
-    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
+    {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Passkey account signed in (email mailbox verification is separate)</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
       {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
-      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your passkey session is active. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
+      <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your passkey session is authenticated. Manage your account, mailbox verification and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
       {connected ? <><p role="status">Wallet connected.</p><p>{canSign ? 'Transaction approval connected.' : 'Transaction signing is not connected yet. You can inspect available wallet records.'}</p></> : busy ? <p role="status">Loading your wallets…</p> : wallets.length === 0 ? <>
         {deployment?.address ? <>
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>

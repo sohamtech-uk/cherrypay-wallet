@@ -2,6 +2,7 @@ import type { WalletBackendClient } from './indexing/wallet-backend.js';
 import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 import { registerPayrollRoutes } from './payroll/routes.js';
 import { registerInvoiceRoutes } from './invoices/routes.js';
+import { registerRecipientDirectoryRoutes } from './recipients/routes.js';
 import { walletOpenApi } from './developers/openapi.js';
 import { InvoiceWebhookWorker } from './invoices/webhook.js';
 import { registerAccessHistory } from './access-history.js';
@@ -52,12 +53,13 @@ app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{
 });
 app.post('/api/v1/passkeys/authentication/options',async(req,reply)=>{try{const value=(req.body as {accountID?:string;email?:string});const account=value.email?await getAccountByEmail(value.email):undefined;return await beginAuthentication(account?.id??value.accountID??'',config.rpID);}catch{return reply.code(400).send({error:'Cannot start authentication'});}});
 app.post('/api/v1/passkeys/authentication/verify',async(req,reply)=>{try{const {accountID,requestID,response}=req.body as {accountID:string;requestID:string;response:Parameters<typeof finishAuthentication>[2]};return await finishAuthentication(accountID,requestID,response,config.rpID,config.origin,{ip:req.ip,userAgent:req.headers['user-agent']});}catch{return reply.code(400).send({error:'Cannot verify authentication'});}});
-app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);const identity=await emailForAccount(id);return {accountID:id,email:identity?.email??null,emailVerified:!!identity?.email_verified_at,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:!!options.deployments};});
+app.get('/api/v1/wallet/me',async(req,reply)=>{const id=await sessionAccount(token(req.headers.authorization));if(!id)return reply.code(401).send({error:'Authentication required'});const credentials=await getCredentials(id);const identity=await emailForAccount(id);return {accountID:id,email:identity?.email??null,emailVerified:!!identity?.email_verified_at,emailPaymentsEnabled:!!identity?.email_payments_enabled,credentialCount:credentials.length,backupCredentialEnrolled:credentials.length>=2,recoveryReady:false,walletDeploymentEnabled:!!options.deployments};});
 app.post('/api/v1/session/logout',async(req,reply)=>{const t=token(req.headers.authorization);if(t)await revokeSession(t);return reply.code(204).send();});
 await registerAccessHistory(app,{pool:db,authenticate:sessionAccount,hash:hashToken,mapsBrowserKey:config.mapsBrowserKey});
 await registerMarket(app,config.marketDemoKey);
 await registerSmartAccountRoutes(app,{deployments:options.deployments,paymentsEnabled:!!options.payments,origin:config.origin});
 await registerIntegrationRoutes(app, config.integrations);
+await registerRecipientDirectoryRoutes(app);
 // Only trusted startup code may supply a runtime after the B1/B2 contract gate.
 const paymentDependencies: PaymentDependencies | undefined = options.payments ? {
   service: options.payments,

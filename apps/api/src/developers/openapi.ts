@@ -55,6 +55,20 @@ const identity = {
       responses: { '204': { description: 'Session revoked or no session was supplied' }, '403': errorResponse } }
   }
 };
+const recipientDirectory = {
+  '/api/v1/wallet/email-verification/request': {
+    post: mutation('Send mailbox verification code', 'Authenticated owner only. Uses configured Exchange Online; code expires after 15 minutes.', body(plain), true)
+  },
+  '/api/v1/wallet/email-verification/confirm': {
+    post: mutation('Confirm mailbox ownership', 'The eight digit code is rate limited and has a maximum of five guesses. Email verification is not legal identity verification.', envelope({ code: { type:'string' } }, ['code']), true)
+  },
+  '/api/v1/wallet/email-directory': {
+    post: mutation('Opt in or out of email payments', 'Opt-in requires mailbox verification and confirmed on-chain wallet binding.', envelope({ enabled: { type:'boolean' } }, ['enabled']), true)
+  },
+  '/api/v1/recipients/resolve': {
+    get: read('Resolve an opted-in recipient email', 'Exact-match authenticated Testnet C-address lookup only. Unverified, private and missing accounts are indistinguishable. No legal identity verification.', true, [{ name:'email', in:'query',required:true,schema:{ type:'string',format:'email' } }])
+  }
+};
 const deployment = {
   '/api/v1/smart-account/capabilities': { get: read('Read smart-account capability gates', 'Testnet contract and verifier metadata. capabilityScope is runtime: spendingEnabled reports the same payment service availability as /health.walletPaymentsEnabled. walletVerificationRequired remains true; individual wallet ownership, on-chain signer and payment authorization checks still apply. These flags are not proof of a completed payment or independent recovery.') },
   '/api/v1/smart-account/relayer': { get: read('Read public Testnet relayer information', 'Returns non-secret relayer status and public key when configured.') },
@@ -101,5 +115,5 @@ export const walletOpenApi = {
     title: 'Cherry Pay Wallet API — Developer Reference',
     description: 'Same-origin API reference for Stellar Testnet smart-wallet accounts, WebAuthn, native XLM payments, invoice checkout, payroll and optional integrations. Available endpoints do not imply feature activation. API responses require verification before marking transactions settled; no real GBP or mainnet XLM transfer support is implied.' },
   servers: [{ url: '/', description: 'Same origin as Cherry Wallet; use /api/v1 for application endpoints.' }],
-  paths: { ...paymentOpenApi.paths, ...identity, ...deployment, ...integrations, ...access }
+  paths: { ...paymentOpenApi.paths, ...identity, ...recipientDirectory, ...deployment, ...integrations, ...access }
 };

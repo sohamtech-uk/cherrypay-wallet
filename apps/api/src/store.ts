@@ -42,7 +42,7 @@ export async function getAccountByEmail(value: string) {
 export async function createEmailVerification(accountID: string) {
   const code = String(randomBytes(4).readUInt32BE(0) % 100000000).padStart(8, '0');
   await pool.query(
-    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at",
+    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at,attempts=0",
     [accountID,hashToken(code)]);
   return code;
 }
@@ -51,18 +51,25 @@ export async function verifyEmail(accountID: string, code: string) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const verified = await client.query(
-      "DELETE FROM wallet_email_verifications WHERE account_id=$1 AND token_hash=$2 AND expires_at>NOW() RETURNING account_id",
-      [accountID,hashToken(code)]);
-    if (verified.rowCount !== 1) { await client.query('ROLLBACK'); return false; }
-    await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1', [accountID]);
+    // A wrong guess consumes one of five attempts, persisted atomically across workers.
+    const candidate = await client.query<{token_hash:string}>(
+      "UPDATE wallet_email_verifications SET attempts=attempts+1 WHERE account_id=$1 AND expires_at>NOW() AND attempts<5 RETURNING token_hash",
+      [accountID]
+    );
+    if (candidate.rowCount !== 1) { await client.query('COMMIT'); return false; }
+    const matches = candidate.rows[0].token_hash === hashToken(code);
+    if (matches) {
+      await client.query('DELETE FROM wallet_email_verifications WHERE account_id=$1', [accountID]);
+      await client.query('UPDATE wallet_accounts SET email_verified_at=NOW() WHERE id=$1', [accountID]);
+    }
     await client.query('COMMIT');
-    return true;
+    return matches;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
+
 export async function emailForAccount(accountID: string) {
-  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null}>("SELECT CASE WHEN position('@' in id)>0 THEN id ELSE NULL END AS email, email_verified_at FROM wallet_accounts WHERE id=$1",[accountID]);
+  const { rows } = await pool.query<{email:string|null;email_verified_at:Date|null;email_payments_enabled:boolean}>("SELECT CASE WHEN position('@' in id)>0 THEN id ELSE NULL END AS email, email_verified_at, email_payments_enabled FROM wallet_accounts WHERE id=$1",[accountID]);
   return rows[0];
 }
 export async function sessionAccount(token:string|undefined):Promise<string|null> {
