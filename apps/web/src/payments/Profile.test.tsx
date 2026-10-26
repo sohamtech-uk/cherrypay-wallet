@@ -74,3 +74,23 @@ it('provides working profile management actions without requesting new wallet ow
   await user.click(screen.getByRole('button',{name:'Sign out'}));
   expect(actions.signOut).toHaveBeenCalledTimes(1);
 });
+
+it('requires mailbox verification and explicit consent before exposing email discovery',async()=>{
+  const user=userEvent.setup();
+  const request=vi.fn(async()=>{}),confirm=vi.fn(async()=>{}),optIn=vi.fn(async()=>{});
+  const state=account({emailVerified:false,emailPaymentsEnabled:false,
+    requestEmailVerification:request,confirmEmailVerification:confirm,
+    setEmailPaymentsEnabled:optIn,deployment:{status:'CONFIRMED',enabled:true,address,spendingEnabled:true} as WalletAccount['deployment']});
+  const view=mount(state,adapter());
+  expect(screen.getByText(/Your email is private and cannot be looked up/)).toBeTruthy();
+  await user.click(screen.getByRole('button',{name:'Send email verification code'}));
+  expect(request).toHaveBeenCalledTimes(1);
+  await user.type(screen.getByLabelText('8-digit email verification code'),'12345678');
+  await user.click(screen.getByRole('button',{name:'Verify email'}));
+  expect(confirm).toHaveBeenCalledWith('12345678');
+  view.rerender(<MemoryRouter><PaymentContext.Provider value={adapter()}>
+    <WalletAccountContext.Provider value={{...state,emailVerified:true}}><Profile/></WalletAccountContext.Provider>
+  </PaymentContext.Provider></MemoryRouter>);
+  await user.click(screen.getByRole('button',{name:'Allow people to pay my verified email'}));
+  expect(optIn).toHaveBeenCalledWith(true);
+});
