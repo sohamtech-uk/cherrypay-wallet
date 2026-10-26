@@ -24,6 +24,8 @@ it('offers Cherry links, payroll and an upgrade preview without charging or requ
   await user.keyboard('{Escape}');expect(screen.queryByRole('link',{name:'Cherry Tax ↗'})).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button',{name:'Products'}));expect(fetcher).not.toHaveBeenCalled();
   expect(document.body.textContent).not.toMatch(/LOBSTR/i);expect(document.body.textContent).toContain('Stellar');
+  expect(within(screen.getByRole('banner')).getByRole('link',{name:'Built on Stellar'}).getAttribute('href')).toBe('https://stellar.org/');
+  expect(within(screen.getByRole('banner')).getByText('Stellar Testnet')).toBeTruthy();
 });
 it('keeps upgrade navigation available after dismissing the banner',async()=>{
   const user=userEvent.setup();render(<MemoryRouter><WalletShell><UpgradeBanner/></WalletShell></MemoryRouter>);
@@ -32,7 +34,25 @@ it('keeps upgrade navigation available after dismissing the banner',async()=>{
 it('renders actual market data separately from test funds and clears it when another period fails',async()=>{
   const now=Date.now(),fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({prices:[[now-86400000,.1],[now,.2]],updatedAt:now,days:1,currency:'USD',asset:'XLM',source:'CoinGecko'}))).mockResolvedValueOnce(new Response('{}',{status:503}));vi.stubGlobal('fetch',fetcher);
   const user=userEvent.setup();render(<MarketChart/>);expect(await screen.findByRole('img',{name:/XLM price in USD/})).toBeTruthy();expect(screen.getByText(/Testnet XLM has no monetary value/)).toBeTruthy();
+  expect(screen.getByText('Sampled high · 24 hours')).toBeTruthy();
+  expect(screen.getByRole('slider',{name:'Explore price history'}).getAttribute('aria-valuetext')).toContain('0.2000 USD');
   await user.click(screen.getByRole('button',{name:'1W'}));expect(await screen.findByText('Market data is unavailable')).toBeTruthy();expect(screen.queryByRole('img')).toBeNull();
+});
+it('announces loading without claiming an outage, and lets keyboard users explore real price points',async()=>{
+  let resolve!:(response:Response)=>void;
+  vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>(done=>{resolve=done;})));
+  const now=Date.now();const user=userEvent.setup();render(<MarketChart/>);
+  expect(screen.getByRole('heading',{name:'Loading XLM price…'})).toBeTruthy();
+  expect(screen.queryByText('Price unavailable')).toBeNull();
+  resolve(new Response(JSON.stringify({prices:[[now-86400000,.1],[now-3600000,.3],[now,.2]],updatedAt:now,days:1,currency:'USD',asset:'XLM',source:'CoinGecko'})));
+  const slider=await screen.findByRole('slider',{name:'Explore price history'});
+  expect(slider.getAttribute('aria-valuetext')).toContain('0.2000 USD');
+  await user.click(slider);
+  // jsdom does not implement native range-arrow behaviour; dispatch the same input change.
+  const {fireEvent}=await import('@testing-library/react');
+  fireEvent.change(slider,{target:{value:'1'}});
+  expect(slider.getAttribute('aria-valuetext')).toContain('0.3000 USD');
+  expect(screen.getByRole('link',{name:'CoinGecko ↗'}).getAttribute('href')).toBe('https://www.coingecko.com/en/coins/stellar');
 });
 it('requires explicit map loading and revocation confirmation; hides history after logout',async()=>{
   const id='a'.repeat(8)+'-aaaa-aaaa-aaaa-'+'a'.repeat(12),createdAt=new Date().toISOString();

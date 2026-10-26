@@ -24,7 +24,7 @@ export function WalletShell({ children, externalNetwork }: { children: React.Rea
   return <div className="wallet-site wallet-workspace">
     <a className="skip-link" href="#wallet-content">Skip to content</a>
     <header className="workspace-header">
-      <Link to="/" className="brand" aria-label="Cherry Wallet home"><span className="brand-icon"><Wallet size={21}/></span><span>cherry<span className="brand-accent">pay</span></span></Link>
+      <div className="wallet-brand-group"><Link to="/" className="brand" aria-label="Cherry Wallet home"><span className="brand-icon"><Wallet size={21}/></span><span>cherry<span className="brand-accent">pay</span></span></Link><a className="stellar-reference" href="https://stellar.org/" target="_blank" rel="noreferrer">Built on <strong>Stellar</strong> <span aria-hidden="true">↗</span></a></div>
       <HeaderMenu/>
       <div className="workspace-tools"><span className={mainnet ? 'mainnet-tag' : readOnly ? 'read-only-tag' : 'testnet'}>{mainnet ? 'Mainnet · real USDC' : readOnly ? 'Read only' : 'Stellar Testnet'}</span><Link className="settings-link" to="/profile" aria-label="Profile & settings"><Settings2 size={19}/><span>Settings</span></Link></div>
     </header>
