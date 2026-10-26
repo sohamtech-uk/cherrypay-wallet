@@ -44,7 +44,7 @@ it('discovers the owned wallet after passkey login without asking for a wallet I
   expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address,canSign:false}));expect(local.mock.calls).toEqual([['cherrypay:testnet:account-id','alice@example.com']]);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/wallets',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
   expect(fetcher.mock.calls.some(([url])=>url.endsWith('/smart-account/deployment'))).toBe(true);
-  await user.click(screen.getByRole('button',{name:'Disconnect wallet'}));
+  await user.click(screen.getByRole('button',{name:'Sign out and disconnect wallet'}));
   await screen.findByRole('button',{name:/Continue with email|Connect with passkey/});expect(onConnect).toHaveBeenLastCalledWith(null);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/session/logout',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
 });
@@ -61,7 +61,7 @@ it('shows an explicit setup state for an account without deployed wallets',async
   expect(screen.queryByText(/Provisioning status: PENDING/)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(fetcher).toHaveBeenCalledWith('/api/v1/smart-account/deployment',expect.objectContaining({method:'POST',body:'{}',headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
-  expect(screen.getByRole('button',{name:'Disconnect wallet'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'Sign out and disconnect wallet'})).toBeTruthy();
 });
 it('does not connect or discover wallets when passkey verification fails',async()=>{
   const fetcher=vi.fn(async(url:string)=>new Response(JSON.stringify(url.endsWith('/options')?{mode:'authenticate',accountID:'alice@example.com',requestID:'challenge',options:{}}:{error:'denied'}),{status:url.endsWith('/options')?200:400}));vi.stubGlobal('fetch',fetcher);
@@ -155,7 +155,7 @@ it('revokes a late new session instead of reconnecting after disconnect during e
   const user=userEvent.setup(),onConnect=vi.fn();render(<PaymentConnection onConnect={onConnect}/>);
   await signIn(user);await screen.findByText(/Wallet connected/);
   await user.click(screen.getByRole('button',{name:'Add another passkey'}));expect(complete).toBeDefined();
-  await user.click(screen.getByRole('button',{name:'Disconnect wallet'}));
+  await user.click(screen.getByRole('button',{name:'Sign out and disconnect wallet'}));
   await act(async()=>{complete!(response({verified:true,accountID:'alice@example.com',token:'abandoned-session',expiresInSeconds:1800,credentialCount:2}));});
   expect(fetcher).toHaveBeenCalledWith('/api/v1/session/logout',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer abandoned-session'})}));
   expect(onConnect).toHaveBeenLastCalledWith(null);expect(screen.queryByText(/Wallet connected/)).toBeNull();
