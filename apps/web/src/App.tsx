@@ -65,7 +65,7 @@ export default function App({ paymentAdapter, signer }: { paymentAdapter?: Payme
     <WalletShell externalNetwork={externalNetwork}>
       {paymentAdapter === undefined
         ? <PaymentConnection onConnect={setConnectedAdapter} signer={signer} showAccountActions={false}
-            showSetup={!external && !['/profile','/security'].includes(pathname) && (!connectedAdapter || pathname === '/onboarding')}><RouteContent external={external}>{screens}</RouteContent></PaymentConnection>
+            showSetup={!external && !['/profile','/security','/developers','/api-docs'].includes(pathname) && (!connectedAdapter || pathname === '/onboarding')}><RouteContent external={external}>{screens}</RouteContent></PaymentConnection>
         : screens}
     </WalletShell>
   </PaymentContext.Provider>;
