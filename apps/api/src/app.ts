@@ -1,6 +1,8 @@
 import type { WalletBackendClient } from './indexing/wallet-backend.js';
 import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 import { registerPayrollRoutes } from './payroll/routes.js';
+import { registerInvoiceRoutes } from './invoices/routes.js';
+import { InvoiceWebhookWorker } from './invoices/webhook.js';
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import { registerIntegrationRoutes } from './integrations/routes.js';
 import { PasskeyApprovalService, PostgresApprovalTickets, postgresAssertionVerifier, type ContractPasskeyCodec } from './payments/passkey-approval.js';
@@ -64,6 +66,15 @@ const paymentDependencies: PaymentDependencies | undefined = options.payments ? 
 } : undefined;
 await registerPaymentRoutes(app, paymentDependencies);
 await registerPayrollRoutes(app, paymentDependencies);
+const invoices=await registerInvoiceRoutes(app,paymentDependencies);
+if(invoices) {
+  let stopInvoices:(()=>Promise<void>)|undefined;
+  const webhook=config.invoiceWebhook?new InvoiceWebhookWorker(invoices.pool,config.invoiceWebhook):undefined;
+  app.addHook('onReady',async()=>{
+    stopInvoices=startPaymentWorker({tick:async()=>{await invoices.tick();await webhook?.tick();}},()=>app.log.warn({code:'INVOICE_RECONCILIATION_RETRY_REQUIRED'},'Invoice worker will retry'));
+  });
+  app.addHook('onClose',async()=>{await stopInvoices?.();});
+}
 if (options.payments) {
   let stop: (() => Promise<void>) | undefined;
   app.addHook('onReady', async () => {

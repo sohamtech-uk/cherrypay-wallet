@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertInvoicePayment } from '../invoices/guard.js';
 import type { Pool, PoolClient } from 'pg';
 import { db } from '../store.js';
 import { digest, requireThat, TERMINAL, type Attempt, type Intent, type TransferEvent, type Wallet } from './model.js';
@@ -127,6 +128,7 @@ export class PostgresPaymentRepository implements PaymentRepository {
       requireThat(owned.length===1,'WALLET_NOT_FOUND',404);
       requireThat(owned[0].address===wallet.address && owned[0].policy===wallet.policy,'WALLET_METADATA_CHANGED');
       requireThat(!locked[0].attempt_id,'RELAYER_BUSY_RESOLVE_EXISTING_ATTEMPT');
+      await assertInvoicePayment(client,intent);
       const now=Date.now();
       const a:Attempt={
         id:randomUUID(),walletId:wallet.id,idempotencyKey:key,requestDigest:digest(intent),intent:copy(intent),
@@ -149,6 +151,9 @@ export class PostgresPaymentRepository implements PaymentRepository {
       const a=attemptOf(rows[0]);a.leaseToken=token;a.leaseUntil=until;
       return {attempt:a,token};
     });
+  }
+  async assertPaymentRequest(a:Attempt):Promise<void> {
+    await transaction(this.pool,client=>assertInvoicePayment(client,a.intent,a.id));
   }
   async checkpoint(a:Attempt,token:string):Promise<void> {
     await transaction(this.pool,client=>saved(client,a,token,false));
