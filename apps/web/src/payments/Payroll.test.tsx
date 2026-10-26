@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { StrKey } from '@stellar/stellar-sdk';
-import { Payroll, parseRecipients } from './Payroll';
+import { Payroll, parseRecipients, resolvePayrollRecipients } from './Payroll';
 import { PaymentContext } from './context';
 import type { Attempt, PaymentAdapter, PayRun } from './model';
 const address = StrKey.encodeContract(Buffer.alloc(32,1)), destination = StrKey.encodeEd25519PublicKey(Buffer.alloc(32,2));
@@ -51,4 +51,21 @@ it('saving a pay run never invokes the signer',async () => {
   await screen.findByRole('heading',{name:'october'});
   expect(adapter.payroll!.create).toHaveBeenCalledWith({network:'TESTNET',reference:'october',maxFeeStroops:'10000000',items:[{reference:'employee-1',destination,amountStroops:'10000001'}]});
   expect(adapter.approve).not.toHaveBeenCalled(); expect(adapter.payroll!.prepare).not.toHaveBeenCalled();
+});
+
+it('resolves opted-in payroll emails before saving immutable Stellar destinations',async()=>{
+  const adapter=fixture(),contract=StrKey.encodeContract(Buffer.alloc(32,12));
+  adapter.supportedDestinations=['classic','contract'];
+  adapter.resolveRecipientEmail=vi.fn(async email=>({network:'TESTNET',email,address:contract,mailboxVerified:true,walletBindingVerified:true,legalIdentityVerified:false}));
+  const result=await resolvePayrollRecipients('employee-1,employee@example.com,1.5000001',adapter);
+  expect(result.items).toEqual([{reference:'employee-1',destination:contract,amountStroops:'15000001'}]);
+  expect(result.aliases).toEqual({'employee-1':'employee@example.com'});
+  expect(adapter.approve).not.toHaveBeenCalled();
+  await expect(resolvePayrollRecipients('employee-1,employee@example.com,1\nemployee-2,employee@example.com,2',adapter))
+    .rejects.toThrow('unique');
+});
+it('rejects payroll recipient email when lookup is unavailable or unverified',async()=>{
+  const adapter=fixture();
+  await expect(resolvePayrollRecipients('employee-1,employee@example.com,1',adapter))
+    .rejects.toThrow('unavailable');
 });
