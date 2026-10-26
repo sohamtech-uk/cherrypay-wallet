@@ -58,13 +58,57 @@ Configure the `azure-wallet-testnet` GitHub environment with:
 | Secret | `WALLET_DATABASE_URL` | Alternative connection URL when not using Key Vault; configure only one source |
 | Secret | `AURORA_INTENTS_API_KEY` | Optional Studio Swap API key, API container only; preserve the same key on later releases |
 
-Scope OIDC federation to `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet`, and restrict that environment's deployment branches to `develop`. Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
+Scope OIDC federation to the **exact immutable subject** `repo:sohamtech-uk@274770785/cherrypay-wallet@1433143174:environment:azure-wallet-testnet` (not the older name-only subject), and restrict the `azure-wallet-testnet` GitHub environment's deployment branches to **`main`** (not `develop`). Grant only the resource/registry operations needed to build images and deploy this app, plus permission to assign the existing image-pull identity. Do not grant subscription-wide Owner or store an Azure client secret. ACR must permit ARM-audience managed-identity authentication for the image-pull identity.
 
-The `Wallet Azure production images` workflow builds and smoke-tests both production images on pull requests and develop pushes. The deployment job runs only on manual dispatch for `develop`, after its container checks pass. GitHub requires the workflow file on the repository's default branch before exposing `workflow_dispatch`; until that is arranged, an authorized operator can run the same `bash infra/azure/deploy.sh` from a clean, checked-out develop commit in Azure Cloud Shell or an authenticated CLI. Set the configuration above in the environment through your secret manager. The script requires Azure CLI (with Container Apps and Bicep support), Node 24, Git and curl. Do not enable `set -x`.
+The `Wallet Azure production images` workflow validates and smoke-tests production images on pull requests and on pushes to `develop` or `main`. **It automatically deploys to the `azure-wallet-testnet` environment after successful container checks only for pushes to `main`** that match the workflow's path filter (`apps/**`, `infra/azure/**`, `scripts/test-production-containers.sh`, `scripts/check-judge-readiness*.mjs`, or `.github/workflows/wallet-azure.yml`). An authorized operator can also use **Run workflow → Branch: `main`**, which runs the same checks before deployment. PR events, pushes to `develop` and manual dispatch from `develop` never deploy. A docs-only merge that does not match the path filter does not deploy automatically; select manual dispatch on `main` if a new rollout is required. Set the environment variables and secrets above before release. The script requires Azure CLI (with Container Apps and Bicep support), Node 24, Git and curl. Do not enable `set -x`.
+
+Before promoting this change, update **Settings → Environments → azure-wallet-testnet → Deployment branches and tags** to allow `main` and review any required reviewers. A workflow cannot override an environment's branch rules, so leaving a `develop`-only restriction will block a `main` deployment even with the fixed workflow. The OIDC trust subject includes GitHub's immutable organization and repository IDs; see the exact values and recovery instructions below. The deployment uses the bootstrap template with payments disabled; **it refuses to overwrite a runtime with primary-passkey payments, recovery-backed payments or Aurora activated**. Preserve that safety boundary and use the separately reviewed payment-enabled release process for an activated wallet.
 
 The script builds API/web images with ACR, resolves their SHA256 digests, sends the database URL as a secure ARM parameter in a temporary mode-0600 file, and deletes the file on exit. It preserves custom-domain certificate bindings on updates and refuses an existing app without the wallet/Testnet tags. Deployment does not become successful until the generated Azure hostname's readiness endpoint confirms Testnet. No live wallet payment or physical passkey ceremony is implied by a successful infrastructure deployment.
 
 The optional Aurora key is also a secure ARM parameter and a Container Apps secret, referenced only by the API container. The template fixes `AURORA_INTENTS_NETWORK=TESTNET` and `AURORA_INTENTS_ENABLED=false`: the current provider route uses mainnet and cannot fund this wallet. A key enables read-only recovery of existing mainnet swaps only. The deployment script refuses to remove an existing Aurora key or overwrite an activated Aurora runtime. Supply the same key through the secret manager on every release after configuration; never put it in source or command arguments.
+
+## GitHub Actions OIDC federation for the main release
+
+GitHub repositories created after July 15, 2026 use immutable organization/repository IDs in the OIDC `sub` claim. Confirmed repository IDs: owner `274770785`, repository `1433143174`. A `deploy` job referencing `environment: azure-wallet-testnet` sends the environment-scoped subject, **not** a `refs/heads/main` branch subject. The Azure federated credential must match these exact values, including case and the two `@ID` segments:
+
+| Claim | Required value |
+| --- | --- |
+| Issuer (`iss`) | `https://token.actions.githubusercontent.com` |
+| Subject (`sub`) | `repo:sohamtech-uk@274770785/cherrypay-wallet@1433143174:environment:azure-wallet-testnet` |
+| Audience (`aud`) | `api://AzureADTokenExchange` |
+
+**AADSTS700213** means Entra ID could not find a credential matching the presented subject. The older `repo:sohamtech-uk/cherrypay-wallet:environment:azure-wallet-testnet` subject does not match this repo. The GitHub environment's branch restriction remains `main`. No change to the GitHub `azure/login` issuer or audience is required.
+
+Determine whether the `AZURE_CLIENT_ID` GitHub environment variable belongs to an **App registration** or a **user-assigned managed identity**. Create the credential on that exact identity, not on the image-pull managed identity unless it is also the configured deploy login identity. Do not create a new Azure identity or grant broader access as a workaround.
+
+For an App registration (Azure Cloud Shell Bash), inspect current credentials and add the explicit GitHub trust without using a client secret:
+
+```bash
+# Existing Application (client) ID matching GitHub's AZURE_CLIENT_ID variable
+APP_CLIENT_ID="<existing-client-id>"
+az ad app federated-credential list --id "$APP_CLIENT_ID" \
+  --query "[].{name:name,issuer:issuer,subject:subject,audiences:audiences}" -o json
+
+cat > /tmp/cherrypay-github-oidc.json <<'JSON'
+{
+  "name": "github-cherrypay-wallet-testnet-immutable",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:sohamtech-uk@274770785/cherrypay-wallet@1433143174:environment:azure-wallet-testnet",
+  "audiences": ["api://AzureADTokenExchange"],
+  "description": "GitHub Actions main -> azure-wallet-testnet"
+}
+JSON
+az ad app federated-credential create \
+  --id "$APP_CLIENT_ID" --parameters /tmp/cherrypay-github-oidc.json
+rm -f /tmp/cherrypay-github-oidc.json
+```
+
+If the `AZURE_CLIENT_ID` instead belongs to a user-assigned managed identity, use the identity's **Federated credentials** configuration in Azure Portal or the corresponding `az identity federated-credential create` command. Do not apply the App-registration CLI example to a managed identity.
+
+After creating the trust, wait for Entra propagation, then **re-run the failed GitHub Actions deploy job** on a `main` run. If OIDC authentication succeeds but deployment still fails, check the next job step for Azure RBAC, missing environment variables/secrets, or the existing bootstrap script's deliberate rejection of an activated payment runtime. No AADSTS700213 fix requires changing repository code, disabling OIDC or storing an Azure client secret.
+
+References: [GitHub immutable OIDC subjects](https://docs.github.com/en/actions/reference/security/oidc), [Microsoft Entra federated credential creation](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust).
 
 ## DNS and HTTPS
 
@@ -104,8 +148,9 @@ Verify the hostname is secured in Azure, HTTP redirects to HTTPS, `/api/v1/netwo
 Email identity upgrades use the additive `004_email_identity.sql` migration.
 Migrations 001–003 retain the original deployed checksums. The upgrade converts
 UUID ownership columns to text without changing existing IDs, passkey user handles,
-sessions, payment attempts or approval ownership. Original profiles can still sign
-in using **Use a legacy account ID**; newly created profiles use email IDs.
+sessions, payment attempts or approval ownership. The current consumer UI accepts email account IDs; backend compatibility for
+original UUID identities is separate from this email-first experience. Newly
+created profiles use email IDs.
 Never clear the database or rewrite stored checksums to resolve a migration error.
 The PostgreSQL upgrade regression test seeds the previous schema and checks restart,
 ownership constraints and pending-payment preservation before deployment.
