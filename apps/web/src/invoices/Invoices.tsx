@@ -36,26 +36,25 @@ function InvoiceManager() {
   async function run(work:()=>Promise<void>) {if(mutex.current)return;mutex.current=true;setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Invoice request failed.');}finally{mutex.current=false;setBusy(false);}}
   const url=selected?`${window.location.origin}/pay/${encodeURIComponent(selected.id)}`:'';
   return <section className="card payment-screen invoice-screen"><span className="eyebrow">STELLAR TESTNET</span><h1>Invoices & reconciliation</h1>
-    <p>Share a payment link. Track the receipt. Match it to your invoice.</p><Link className="text-link" to="/business">← Business dashboard</Link>
+    <p>Create an invoice QR to match a payment automatically. Address-only payments remain unmatched until you assign a verified receipt.</p>
     <p role="alert" className="error">{error}</p><p role="status">{notice}</p>
-    <div className="section-toolbar"><h2>Payment requests</h2><button type="button" aria-expanded={creating} onClick={()=>setCreating(v=>!v)}>{creating ? 'Close invoice form' : 'New invoice'}</button></div>
-    {(creating) && <form onSubmit={e=>{e.preventDefault();void run(async()=>{
+    <form onSubmit={e=>{e.preventDefault();void run(async()=>{
       const exact=stroops(amount);if(exact<=0n)throw Error('Enter an amount greater than zero.');
       const input:InvoiceInput={network:NETWORK,invoiceReference:reference.trim(),merchantName:merchant.trim(),amountStroops:exact.toString(),expiresAt:Date.parse(expiry+'Z')};
       // Keep the exact expiry when retrying a lost create response.
-      draft.current=input;setSelected(await api.create(draft.current));await refresh();setNotice('Invoice saved. Share its payment link or QR.');setCreating(false);
+      draft.current=input;setSelected(await api.create(draft.current));await refresh();setNotice('Invoice saved. Share its payment link or QR.');
     });}}><fieldset disabled={busy}><legend>Create invoice payment request</legend>
       <label htmlFor="merchant-name">Merchant name</label><input id="merchant-name" value={merchant} maxLength={100} required onChange={e=>setMerchant(e.target.value)}/>
       <label htmlFor="invoice-reference">Invoice reference</label><input id="invoice-reference" value={reference} maxLength={64} required onChange={e=>setReference(e.target.value)}/>
       <label htmlFor="invoice-amount">Invoice amount (Testnet XLM)</label><input id="invoice-amount" inputMode="decimal" value={amount} required onChange={e=>setAmount(e.target.value)}/>
       <label htmlFor="invoice-expiry">Payment link expiry (UTC, within 90 days)</label><input id="invoice-expiry" type="datetime-local" value={expiry} required onChange={e=>setExpiry(e.target.value)}/>
       <button type="submit">Create invoice QR</button>
-    </fieldset></form>}
-    <h2>Saved invoices</h2><label htmlFor="invoice-filter">Show invoices</label><select id="invoice-filter" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All invoices</option><option value="outstanding">Outstanding</option><option value="paid">Paid / overpaid</option></select><p className="small-copy">Filter applies to loaded invoices.</p><button className="secondary-button" disabled={busy} onClick={()=>void run(refresh)}>Refresh invoices and receipts</button>
+    </fieldset></form>
+    <h2>Saved invoices</h2><button className="secondary-button" disabled={busy} onClick={()=>void run(refresh)}>Refresh invoices and receipts</button>
     {!items.length&&<p>No invoice requests loaded.</p>}
-    <ul className="invoice-list">{items.filter(r=>filter==='all'||(filter==='outstanding'?r.remainingStroops!=='0':r.remainingStroops==='0')).map(r=><li key={r.id}><button className="secondary-button" disabled={busy} onClick={()=>void run(async()=>{setSelected(await api.get(r.id));setEventId('');setNote('');setConfirmed(false);})}>{r.invoiceReference} · {xlm(r.amountStroops)} XLM · {r.status.replaceAll('_',' ')}</button></li>)}</ul>
+    <ul className="invoice-list">{items.map(r=><li key={r.id}><button className="secondary-button" disabled={busy} onClick={()=>void run(async()=>{setSelected(await api.get(r.id));setEventId('');setNote('');setConfirmed(false);})}>{r.invoiceReference} · {xlm(r.amountStroops)} XLM · {r.status.replaceAll('_',' ')}</button></li>)}</ul>
     {next&&<button disabled={busy} onClick={()=>void run(async()=>{const page=await api.list(next);setItems(old=>[...old,...page.items]);setNext(page.nextCursor);})}>Load more invoices</button>}
-    {selected&&<section aria-label="Invoice reconciliation"><h2 ref={detailHeading} tabIndex={-1}>{selected.invoiceReference}</h2><p>{selected.merchantName} · {selected.status.replaceAll('_',' ')}</p>
+    {selected&&<section aria-label="Invoice reconciliation"><h2>{selected.invoiceReference}</h2><p>{selected.merchantName} · {selected.status.replaceAll('_',' ')}</p>
       <p>Allocated: {xlm(selected.paidStroops)} / {xlm(selected.amountStroops)} XLM. Remaining: {xlm(selected.remainingStroops)} XLM.</p>
       {selected.paymentPending&&<p role="status">A payment is being resolved. Additional checkout payments are blocked.</p>}
       {selected.expired&&<p>This payment link has expired. Existing transfers can still be reconciled.</p>}
@@ -74,7 +73,7 @@ function InvoiceManager() {
         <label className="check-label"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/> I have verified this receipt belongs to this invoice. This allocation is recorded in the audit trail.</label>
         <button disabled={!confirmed||!eventId}>Assign receipt to invoice</button>
       </fieldset></form>
-      {receiptNext&&<button disabled={busy} onClick={()=>void run(async()=>{const p=await api.unmatched(receiptNext);setReceipts(old=>[...old,...p.items]);setReceiptNext(p.nextCursor);})}>Load more unmatched receipts</button>}</details>
+      {receiptNext&&<button disabled={busy} onClick={()=>void run(async()=>{const p=await api.unmatched(receiptNext);setReceipts(old=>[...old,...p.items]);setReceiptNext(p.nextCursor);})}>Load more unmatched receipts</button>}
     </section>}
   </section>;
 }
