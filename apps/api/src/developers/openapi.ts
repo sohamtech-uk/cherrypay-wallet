@@ -28,6 +28,9 @@ function mutation(summary: string, description: string, request: object, authent
       '403': errorResponse, '409': errorResponse, '429': errorResponse, '503': errorResponse } };
 }
 const identity = {
+  '/health': { get: read('Check API process liveness', 'Public liveness only, including current deployment/payment capability booleans. A healthy process is not proof of on-chain settlement.') },
+  '/ready': { get: read('Check API database readiness', 'Returns 200 when the database is reachable, or 503 on readiness failure. Not a blockchain readiness guarantee.') },
+  '/api/v1/openapi.json': { get: read('Fetch live OpenAPI 3.1 documentation', 'The public read-only developer API contract. Contains endpoint descriptions and schemas, not account data or secrets.') },
   '/api/v1/network': { get: read('Check selected Stellar network', 'Returns configured Testnet RPC/Horizon endpoints and whether deployment is available; no transfer authority.') },
   '/api/v1/passkeys/onboarding/options': {
     post: mutation('Begin email-linked passkey onboarding', 'Returns a registration or authentication WebAuthn ceremony for the supplied email; email is an account identifier, not mailbox-ownership proof.', envelope({ email }, ['email']))
