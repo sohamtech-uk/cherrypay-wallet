@@ -14,12 +14,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const pending = () => response({ status: 'PENDING', address: null, transactionHash: null, deploymentEnabled: false }, 202);
-function fixture(deployment: () => Promise<Response>, seconds = 1800, mode = 'authenticate') {
-  const fetcher = vi.fn(async (url: string) => {
+function fixture(deployment: (init?: RequestInit) => Promise<Response>, seconds = 1800, mode = 'authenticate') {
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/options')) return response({ mode, accountID: 'alice@example.com', requestID: 'challenge', options: { challenge: 'challenge' } });
     if (url.endsWith('/verify')) return response({ verified: true, accountID: 'alice@example.com', token: 'secret-session', expiresInSeconds: seconds, credentialCount: 1 });
     if (url.endsWith('/wallets')) return response({ network: 'TESTNET', items: [] });
-    if (url.endsWith('/smart-account/deployment')) return deployment();
+    if (url.endsWith('/smart-account/deployment')) return deployment(init);
     if (url.endsWith('/logout')) return new Response(null, { status: 204 });
     throw Error('Unexpected test endpoint');
   });
@@ -116,4 +116,25 @@ it('never creates a new passkey when an existing user cancels authentication',as
   fixture(async()=>pending());vi.mocked(startAuthentication).mockRejectedValueOnce(new DOMException('Cancelled','NotAllowedError'));
   const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);await signIn(user);
   await screen.findByRole('alert');expect(startRegistration).not.toHaveBeenCalled();
+});
+
+it.each(['AWAITING_PASSKEY', 'PENDING', 'NOT_STARTED'])('resumes a %s reservation after the operator enables deployment without another passkey ceremony', async status => {
+  let enabled = false;
+  const fetcher = fixture(async () => response(enabled
+    ? { status: 'PENDING', network: 'TESTNET', deploymentEnabled: true, onChainSignerBound: false, spendingEnabled: false, recoveryReady: false }
+    : { status, deploymentEnabled: false }, 202));
+  const user = userEvent.setup();
+  render(<PaymentConnection onConnect={vi.fn()}/>);
+  await signIn(user);
+  await screen.findByText(/Automatic wallet creation is disabled on this server/);
+  expect(screen.queryByText(/Provisioning status: AWAITING_PASSKEY/)).toBeNull();
+  expect(startAuthentication).toHaveBeenCalledTimes(1);
+  enabled = true;
+  await user.click(screen.getByRole('button', { name: 'Refresh deployment status' }));
+  await screen.findByText(/Automatic Testnet deployment is processing/);
+  const reservations = fetcher.mock.calls.filter(([url]) => url.endsWith('/smart-account/deployment'));
+  expect(reservations).toHaveLength(2);
+  expect(reservations[1][1]).toMatchObject({ method: 'POST', body: '{}' });
+  expect(startAuthentication).toHaveBeenCalledTimes(1);
+  expect(startRegistration).not.toHaveBeenCalled();
 });
