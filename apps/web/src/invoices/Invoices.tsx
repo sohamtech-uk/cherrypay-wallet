@@ -74,6 +74,7 @@ function InvoiceManager() {
         <button disabled={!confirmed||!eventId}>Assign receipt to invoice</button>
       </fieldset></form>
       {receiptNext&&<button disabled={busy} onClick={()=>void run(async()=>{const p=await api.unmatched(receiptNext);setReceipts(old=>[...old,...p.items]);setReceiptNext(p.nextCursor);})}>Load more unmatched receipts</button>}
+      </details>
     </section>}
   </section>;
 }
