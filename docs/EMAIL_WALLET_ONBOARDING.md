@@ -9,7 +9,7 @@ login never falls back to replacing an existing credential.
 
 The browser must ask for the device's passkey confirmation. Email is an account
 identifier; this flow does not verify mailbox ownership. Session credentials stay
-in memory. Legacy UUID accounts retain their existing sign-in route.
+in memory. The consumer UI is email-first and does not offer legacy UUID login. Legacy UUID records and backend authentication compatibility remain separate from the new-email onboarding flow.
 
 After verified registration or login, the UI queues or resumes the user's
 passkey-controlled C-address deployment. It displays an address only after the
@@ -84,3 +84,65 @@ UI states. PostgreSQL integration tests cover duplicate requests, durable HTTP
 checkpoints, restart reconciliation, concurrent workers and historical grants
 with synthetic evidence. A live Friendbot grant and independently verified RPC
 receipt are separate acceptance evidence; mocked tests do not prove them.
+
+## Wallet app profile and onboarding acceptance (PR #56)
+
+The active account session is owned by `PaymentConnection` for the lifetime of the
+wallet application. The `/profile` route is now an independent `Profile`
+component consuming a read-only account snapshot and explicitly permitted
+actions through `WalletAccountContext`. The context **never contains the bearer
+session token**. Route changes do not remount the session controller. Neither
+profile information nor a verified C-address may be rendered for an unauthenticated
+session.
+
+The profile includes the email/account ID (read-only), registered sign-in passkey
+count, separated wallet status, a masked verified C-address with Show/Hide and
+Copy, funding state and appropriately gated funding action, independent signer
+recovery warnings and sign-out. Adding a sign-in credential does not silently
+create an on-chain backup signer. Payment authorization is not implemented by
+the profile page.
+
+### Automated checks
+
+Run `cd apps/web && npm ci && npm run build && npm run lint && npm test`.
+The GitHub Actions **Payment frontend checks** workflow executes these steps.
+`wallet-journey.test.tsx` covers the complete **frontend** registration and
+returning-user route flow using mocked backend/WebAuthn APIs, including
+profile navigation without another login, account visibility, address masking,
+deployment unavailable state and session logout.
+`Profile.test.tsx` separately covers private fields, funding disabled before
+verified deployment, copy/reveal controls and available profile actions.
+Existing connection/deployment, balance, send, receive and API tests remain
+regression gates. **Mock-backed frontend tests are not live blockchain E2E
+acceptance.**
+
+### Required live staging acceptance before enabling new users
+
+Use two separate email identities and independently controlled passkeys on
+Stellar Testnet, with no reused profile, wallet or browser session.
+Record redacted pass/fail evidence and verified hashes/ledger numbers:
+
+1. Register A. Verify email is the account ID, passkey confirmation is requested,
+   and a C-wallet is not shown before on-chain signer/deployment confirmation.
+2. Refresh during pending deployment; confirm status is recoverable after a reload,
+   without a duplicate deploy or a new wallet/address.
+3. Confirm deployment and payer-specific funding for A; ensure the single Testnet
+   grant has a verified receipt and the indexed balance updates.
+4. Navigate Dashboard → Profile → Send → Receive → Profile without another
+   authentication until expiry. Verify masks and copies the *same* owned C-address;
+   ensure a foreign user's wallet is never shown.
+5. Add a second sign-in passkey, then verify it **does not** claim on-chain backup
+   recovery and does not silently authorize payments.
+6. Register B independently, receive supported native-XLM SAC Testnet transfer
+   from A, approve on A's primary passkey, confirm the exact hash and transfer
+   event, and verify A/B balances and histories independently.
+7. Exercise cancelled passkey approval, uncertain/failed send recovery and
+   duplicate idempotency requests without creating another payment.
+8. Sign out on both devices; confirm bearer revocation, no authenticated profile
+   details, and a fresh passkey challenge before returning.
+9. Test narrow viewport, keyboard-only focus order, error states and screen reader
+   labels for the profile and onboarding steps.
+
+Actual authenticator and Stellar RPC receipt evidence must be recorded
+separately from CI. Do not label a staging exercise complete without those
+observations; Testnet assets have no monetary value.

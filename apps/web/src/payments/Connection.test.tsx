@@ -28,22 +28,12 @@ async function signIn(user:ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/(?:Email address \(Account ID\)|Account ID)/),'alice@example.com');
   await user.click(screen.getByRole('button',{name:/Continue with email|Connect with passkey/}));
 }
-it.each([true,false])('allows an existing UUID account to sign in after the email upgrade (saved: %s)',async(saved)=>{
-  const owner='99c79e5e-d587-4bf6-90b0-55710fdb396c';
-  if(saved)localStorage.setItem('cherrypay:testnet:account-id',owner);
-  const fetcher=fixture(),original=fetcher.getMockImplementation()!;
-  fetcher.mockImplementation(async url=>{
-    if(url.endsWith('/verify'))return response({verified:true,accountID:owner,token:'legacy-session',expiresInSeconds:1800,credentialCount:1});
-    return original(url);
-  });
-  const user=userEvent.setup(),onConnect=vi.fn();render(<PaymentConnection onConnect={onConnect}/>);
-  if(!saved){await user.click(screen.getByRole('checkbox',{name:'Use a legacy account ID'}));await user.type(screen.getByLabelText('Existing account ID'),owner);}
-  expect(screen.queryByRole('button',{name:'Create passkey profile'})).toBeNull();
-  await user.click(screen.getByRole('button',{name:/Continue with email|Connect with passkey/}));
-  await screen.findByText(/Wallet connected/);
-  expect(fetcher).toHaveBeenCalledWith('/api/v1/passkeys/authentication/options',expect.objectContaining({body:JSON.stringify({accountID:owner})}));
-  expect(startAuthentication).toHaveBeenCalledTimes(1);
-  expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address}));
+it('uses email-only passkey onboarding and never offers legacy account IDs',async()=>{
+  const fetcher=fixture();const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);
+  expect(screen.queryByRole('checkbox',{name:'Use a legacy account ID'})).toBeNull();
+  expect(screen.getByLabelText('Email address (Account ID)')).toHaveProperty('type','email');
+  await signIn(user);await screen.findByText(/Wallet connected/);
+  expect(fetcher).toHaveBeenCalledWith('/api/v1/passkeys/onboarding/options',expect.objectContaining({body:JSON.stringify({email:'alice@example.com'})}));
 });
 it('discovers the owned wallet after passkey login without asking for a wallet ID or storing its token',async()=>{
   const fetcher=fixture(), local=vi.spyOn(Storage.prototype,'setItem'),onConnect=vi.fn();
@@ -54,7 +44,7 @@ it('discovers the owned wallet after passkey login without asking for a wallet I
   expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address,canSign:false}));expect(local.mock.calls).toEqual([['cherrypay:testnet:account-id','alice@example.com']]);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/wallets',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
   expect(fetcher.mock.calls.some(([url])=>url.endsWith('/smart-account/deployment'))).toBe(true);
-  await user.click(screen.getByRole('button',{name:'Disconnect wallet'}));
+  await user.click(screen.getByRole('button',{name:'Sign out and disconnect wallet'}));
   await screen.findByRole('button',{name:/Continue with email|Connect with passkey/});expect(onConnect).toHaveBeenLastCalledWith(null);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/session/logout',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
 });
@@ -71,7 +61,7 @@ it('shows an explicit setup state for an account without deployed wallets',async
   expect(screen.queryByText(/Provisioning status: PENDING/)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(fetcher).toHaveBeenCalledWith('/api/v1/smart-account/deployment',expect.objectContaining({method:'POST',body:'{}',headers:expect.objectContaining({Authorization:'Bearer secret-session'})}));
-  expect(screen.getByRole('button',{name:'Disconnect wallet'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'Sign out and disconnect wallet'})).toBeTruthy();
 });
 it('does not connect or discover wallets when passkey verification fails',async()=>{
   const fetcher=vi.fn(async(url:string)=>new Response(JSON.stringify(url.endsWith('/options')?{mode:'authenticate',accountID:'alice@example.com',requestID:'challenge',options:{}}:{error:'denied'}),{status:url.endsWith('/options')?200:400}));vi.stubGlobal('fetch',fetcher);
@@ -165,7 +155,7 @@ it('revokes a late new session instead of reconnecting after disconnect during e
   const user=userEvent.setup(),onConnect=vi.fn();render(<PaymentConnection onConnect={onConnect}/>);
   await signIn(user);await screen.findByText(/Wallet connected/);
   await user.click(screen.getByRole('button',{name:'Add another passkey'}));expect(complete).toBeDefined();
-  await user.click(screen.getByRole('button',{name:'Disconnect wallet'}));
+  await user.click(screen.getByRole('button',{name:'Sign out and disconnect wallet'}));
   await act(async()=>{complete!(response({verified:true,accountID:'alice@example.com',token:'abandoned-session',expiresInSeconds:1800,credentialCount:2}));});
   expect(fetcher).toHaveBeenCalledWith('/api/v1/session/logout',expect.objectContaining({headers:expect.objectContaining({Authorization:'Bearer abandoned-session'})}));
   expect(onConnect).toHaveBeenLastCalledWith(null);expect(screen.queryByText(/Wallet connected/)).toBeNull();

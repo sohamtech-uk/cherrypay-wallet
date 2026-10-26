@@ -70,7 +70,7 @@ it('ignores a pending deployment response after disconnect', async () => {
   const onConnect = vi.fn(), user = userEvent.setup(); render(<PaymentConnection onConnect={onConnect}/>);
   await signIn(user);
   expect(complete).toBeDefined();
-  await user.click(screen.getByRole('button', { name: 'Disconnect wallet' }));
+  await user.click(screen.getByRole('button', { name: 'Sign out and disconnect wallet' }));
   await act(async () => { complete!(pending()); });
   expect(screen.getByRole('button', { name: 'Continue with email' })).toBeTruthy();
   expect(screen.queryByText(/Provisioning status/)).toBeNull();
