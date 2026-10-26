@@ -29,6 +29,18 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
   const [busy, setBusy] = useState(false);
   const mutex = useRef(false);
   const alert = useRef<HTMLParagraphElement>(null);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const statusHeading = useRef<HTMLHeadingElement>(null);
+  const destinationInput = useRef<HTMLInputElement>(null);
+  const recipientEmailInput = useRef<HTMLInputElement>(null);
+  const previousQuote = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (error) alert.current?.focus();
+    else if (quote && previousQuote.current !== quote.id) reviewHeading.current?.focus();
+    else if (!quote && previousQuote.current)
+      (key ? statusHeading.current : recipientMode === 'email' ? recipientEmailInput.current : destinationInput.current)?.focus();
+    previousQuote.current = quote?.id;
+  }, [quote, key, error, recipientMode]);
   const [accepted, setAccepted] = useState(false);
   useEffect(()=>{if(request&&!quote&&!key){setDestination(request.destination);setAmount(xlm(request.remainingStroops));}},[request,quote,key]);
   const requestClosed=!!request&&(request.expired||request.expiresAt<=Date.now()||request.remainingStroops==='0'||checkoutUnavailable);
@@ -47,7 +59,7 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
   async function run(action: () => Promise<void>) {
     if (mutex.current) return;
     mutex.current = true; setBusy(true); setError('');
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'The wallet service is unavailable. Try checking status again.'); setTimeout(() => alert.current?.focus(), 0); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'The wallet service is unavailable. Try checking status again.'); }
     finally { mutex.current = false; setBusy(false); }
   }
   const requestId=request?.id;
@@ -100,11 +112,11 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
         </fieldset>}
         {recipientMode === 'email' && !request ? <>
           <label htmlFor="recipient-email">Recipient email</label>
-          <input id="recipient-email" type="email" autoComplete="off" maxLength={254} required value={recipientEmail} onChange={e => { setRecipientEmail(e.target.value); setResolvedRecipient(undefined); }} aria-describedby="recipient-email-help"/>
+          <input ref={recipientEmailInput} id="recipient-email" type="email" autoComplete="off" maxLength={254} required value={recipientEmail} onChange={e => { setRecipientEmail(e.target.value); setResolvedRecipient(undefined); }} aria-describedby="recipient-email-help"/>
           <p id="recipient-email-help">Only verified, opted-in Cherry Wallet accounts with an active Testnet smart wallet can receive payments by email. This does not verify a legal name or company.</p>
         </> : <>
           <label htmlFor="destination">Recipient address</label>
-          <input id="destination" readOnly={!!request} autoComplete="off" spellCheck={false} value={destination} onChange={e => { setDestination(e.target.value); setResolvedRecipient(undefined); }} aria-invalid={!!destinationFeedback} aria-describedby="destination-feedback" required/>
+          <input ref={destinationInput} id="destination" readOnly={!!request} autoComplete="off" spellCheck={false} value={destination} onChange={e => { setDestination(e.target.value); setResolvedRecipient(undefined); }} aria-invalid={!!destinationFeedback} aria-describedby="destination-feedback" required/>
           <p id="destination-feedback">{destinationFeedback || 'Use a Stellar Testnet G- or C-address. Memo-required exchange deposits are not supported.'}</p>
         </>}
         <label htmlFor="amount">Exact amount (XLM)</label><input id="amount" readOnly={!!request} inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} aria-describedby="amount-help" required/>
@@ -112,7 +124,7 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
       </fieldset>
       {!quote && <button disabled={busy || requestClosed || !!request?.paymentPending} type="submit">{busy ? 'Loading fee preview…' : 'Preview payment'}</button>}
     </form>}
-    {quote && (!key || adapter.persistentPreview) && <section aria-label="Review payment"><h2>Review and approve</h2><dl><dt>Network</dt><dd>Stellar Testnet</dd><dt>From</dt><dd>{quote.from}</dd>
+    {quote && (!key || adapter.persistentPreview) && <section aria-label="Review payment"><h2 ref={reviewHeading} tabIndex={-1}>Review and approve</h2><dl><dt>Network</dt><dd>Stellar Testnet</dd><dt>From</dt><dd>{quote.from}</dd>
       {resolvedRecipient && <><dt>Recipient email</dt><dd>{resolvedRecipient.email} · mailbox verified and wallet bound (not legal identity verified)</dd></>}
       <dt>Recipient wallet (actual destination)</dt><dd>{quote.destination}</dd>
       <dt>Recipient receives</dt><dd>{xlm(quote.amountStroops)} XLM</dd>
@@ -144,7 +156,7 @@ function SendForm({request,checkoutUnavailable}:{request?:Invoice;checkoutUnavai
         if (created.status === 'awaiting_approval') setAttempt(validateAttempt(await adapter.approve(created.id, quote))); setQuote(undefined);
       })}>{busy ? 'Requesting approval…' : 'Approve exact payment'}</button><button className="secondary-button" disabled={busy} onClick={() => void run(async () => { if (adapter.persistentPreview) { if (!adapter.cancelAttempt) throw new Error('Cancellation unavailable.'); const cancelled = validateAttempt(await adapter.cancelAttempt(quote.id)); setAttempt(cancelled); if (cancelled.status !== 'rejected' && cancelled.status !== 'failed') throw new Error('Check the existing payment before editing.'); localStorage.removeItem(storageKey); setKey(''); setAttempt(undefined); } setQuote(undefined); setAccepted(false); })}>Edit payment</button></div>
     </section>}
-    {key && <section aria-label="Payment status"><h2>Payment status</h2><p role="status">{busy ? 'Waiting for wallet service or approval…' : attempt ? statusLabel(attempt) : 'Outcome unknown — recover the existing attempt before starting another payment.'}</p>
+    {key && <section aria-label="Payment status"><h2 ref={statusHeading} tabIndex={-1}>Payment status</h2><p role="status">{busy ? 'Waiting for wallet service or approval…' : attempt ? statusLabel(attempt) : 'Outcome unknown — recover the existing attempt before starting another payment.'}</p>
       {attempt && <><p>{attempt.failureMessage}</p><p className="mono">Attempt: {attempt.id}</p><Link className="secondary-button" to={`/history/${encodeURIComponent(attempt.id)}`}>View payment detail</Link>{explorerLink(attempt) && <a className="secondary-button" href={explorerLink(attempt)} target="_blank" rel="noreferrer">Verified Testnet receipt</a>}</>}
       <p>{polling ? 'Status refreshes automatically every 5 seconds while confirmation is unresolved. ' : ''}Checking status never creates or resubmits a replacement payment. If approval was interrupted, review the existing attempt with your wallet service.</p>
       <div className="actions"><button disabled={busy || key === 'storage-unavailable'} onClick={() => void run(async () => { const result = await adapter.getAttemptByKey(key); if (!result) throw new Error('The attempt is not yet available. Check again later; do not submit a replacement.'); setAttempt(validateAttempt(result)); })}>Check existing attempt</button>
