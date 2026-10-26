@@ -79,3 +79,16 @@ describe('recipient directory authentication and privacy',()=>{
     expect((await app.inject({url:'/api/v1/recipients/resolve?email=another%40example.com',headers})).statusCode).toBe(429);
   });
 });
+
+
+it.each(['AZURE_MAIL_CONFIGURATION_INVALID','AZURE_MAIL_TOKEN_FAILED','AZURE_MAIL_SEND_FAILED','private provider error: recipient secret 12345678'])(
+  'reports email delivery failure safely instead of claiming the message was sent: %s', async (reason) => {
+    sendEmail.mockRejectedValueOnce(new Error(reason));
+    const result = await app.inject({method:'POST',url:'/api/v1/wallet/email-verification/request',headers,payload:{}});
+    expect(result.statusCode).toBe(503);
+    expect(result.json()).toEqual({error:'EMAIL_DELIVERY_UNAVAILABLE'});
+    expect(result.body).not.toContain(sender);
+    expect(result.body).not.toContain('12345678');
+    expect(mock.verifyEmail).not.toHaveBeenCalled();
+  }
+);

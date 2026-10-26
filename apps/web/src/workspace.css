@@ -48,3 +48,14 @@ body{background:var(--surface);color:var(--ink);font-size:14px;line-height:1.55}
 .developer-operation-detail code{overflow-wrap:anywhere}
 .developer-operation-detail .secondary-button{font-size:12px;margin-top:9px}
 @media(max-width:700px){.developer-portal .card{padding:18px}.developer-filters{grid-template-columns:1fr}.developer-metrics{grid-template-columns:1fr}.developer-operation>summary{flex-wrap:wrap;gap:7px}.developer-path{flex-basis:calc(100% - 85px)}.developer-auth{margin-left:66px}.developer-operation>summary::after{margin-left:auto}.developer-url input{flex-basis:100%}}
+
+/* Recipient selection is a separate, keyboard-operable first step. */
+.payment-method-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:22px 0}
+.payment-screen .payment-method-card{display:flex;flex-direction:column;align-items:flex-start;gap:12px;text-align:left;white-space:normal;width:100%;min-height:180px;margin:0;padding:20px;border:2px solid var(--line);background:#fff;color:var(--ink);border-radius:14px}
+.payment-method-card strong{font-size:17px}.payment-method-card>span{font-size:13px;line-height:1.5;font-weight:400}
+.payment-screen .payment-method-card[aria-pressed=true]{border-color:var(--cherry);background:#fff5f8}.payment-method-card .payment-method-selected{display:flex;align-items:center;gap:6px;color:var(--cherry);font-weight:650;margin-top:auto}
+.payment-screen .payment-method-card:disabled{background:#f5f6f8;color:#596375;border-color:var(--line)}
+.payment-method-card:focus-visible,.payment-method-next:focus-visible{outline:3px solid var(--cherry);outline-offset:4px}
+.payment-screen .payment-method-next{width:100%;margin:0;min-height:46px}.payment-method-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.payment-method-summary h2{margin:0}.payment-method-summary button{margin:0}
+.email-verification-feedback{padding:12px 14px;border-radius:10px;background:#f5f7fa;overflow-wrap:anywhere}.email-verification-feedback.error{background:#fff1f3}.email-verification-feedback:focus-visible{outline:2px solid var(--cherry);outline-offset:3px}
+@media(max-width:520px){.payment-method-grid{grid-template-columns:1fr;gap:12px}.payment-screen .payment-method-card{min-height:146px;padding:17px}.payment-method-summary{gap:8px}}
