@@ -2,6 +2,7 @@ import type { WalletBackendClient } from './indexing/wallet-backend.js';
 import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 import { registerPayrollRoutes } from './payroll/routes.js';
 import { registerInvoiceRoutes } from './invoices/routes.js';
+import { walletOpenApi } from './developers/openapi.js';
 import { InvoiceWebhookWorker } from './invoices/webhook.js';
 import { registerSmartAccountRoutes } from './smart-account/routes.js';
 import { registerIntegrationRoutes } from './integrations/routes.js';
@@ -23,6 +24,8 @@ function limited(ip:string,route:string){const key=ip+':'+route,now=Date.now(),o
 app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-store');reply.header('X-Content-Type-Options','nosniff');if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==config.origin)return reply.code(403).send({error:'Untrusted origin'});if(req.method==='POST'&&req.url.startsWith('/api/v1/passkeys/')&&limited(req.ip,req.url))return reply.code(429).send({error:'Too many attempts'});});
 app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments,walletPaymentsEnabled:!!options.payments}));
 app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
+// Public, read-only API reference. No runtime keys, sessions or account data.
+app.get('/api/v1/openapi.json', { schema: { querystring: { type: 'object', additionalProperties: false } } }, async () => walletOpenApi);
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:!!options.deployments}));
 app.post('/api/v1/passkeys/onboarding/options', {schema:{body:{type:'object',required:['email'],additionalProperties:false,properties:{email:{type:'string',minLength:3,maxLength:254}}}}}, async(req,reply)=>{
  try{return await beginEmailOnboarding(config.rpID,(req.body as {email:string}).email);}

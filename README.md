@@ -2,6 +2,10 @@
 
 Customer-controlled, **Stellar Testnet-only** XLM smart-wallet MVP. Contains passkey identity/session persistence, payment preparation/reconciliation APIs, a fee-relayer implementation, wallet UI, and API tests. **Contract deployment, on-chain spending authorization, and independent recovery are not yet validated.** The default payment endpoints intentionally return 503 until secure B1/B2 adapters are supplied.
 
+## Developer API
+
+The wallet has a [developer API reference](docs/DEVELOPER_API_PORTAL.md). After the matching API/web images are deployed, open [Developer portal](https://wallet.cherrymoney.co.uk/developers) or fetch [OpenAPI 3.1 JSON](https://wallet.cherrymoney.co.uk/api/v1/openapi.json). These are planned release URLs, not proof of current deployment. Payment, invoice and payroll APIs remain gated by authentication and runtime activation.
+
 ## Local setup
 
 1. Copy `.env.example` to `.env`; set a strong local `DB_PASSWORD`.
