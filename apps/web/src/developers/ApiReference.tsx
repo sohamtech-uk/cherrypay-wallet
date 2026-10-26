@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Check, ClipboardCopy, Code2, ExternalLink, RefreshCw, Search } from 'lucide-react';
+import { BookOpen, ClipboardCopy, Code2, ExternalLink, RefreshCw, Search } from 'lucide-react';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 type Operation = {
