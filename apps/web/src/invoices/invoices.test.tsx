@@ -85,7 +85,7 @@ describe('invoice checkout',()=>{
     expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeTruthy();
     expect(service.approve).not.toHaveBeenCalled();
   });
-  it.each([{...request,expired:true},{...request,paymentPending:true},{...request,status:'paid' as const,paidStroops:'10000000',remainingStroops:'0'}])('blocks fresh payment for unavailable requests',r=>{
+  it.each([{...request,expired:true},{...request,paymentPending:true},{...request,status:'paid' as const,paidStroops:'10000000',remainingStroops:'0'},{...request,status:'partially_paid' as const,paidStroops:'3000000',remainingStroops:'7000000'}])('blocks fresh payment for unavailable requests',r=>{
     mount(<Send request={r}/>,adapter());expect(screen.getByRole('button',{name:'Preview payment'})).toHaveProperty('disabled',true);
   });
   it('preserves an unknown saved payment instead of preparing another invoice',async()=>{
@@ -117,6 +117,38 @@ describe('merchant invoices',()=>{
     expect((await screen.findByTestId('qr-value')).textContent).toBe(window.location.origin+'/pay/'+request.id);
     expect(screen.getByLabelText('Invoice payment link')).toHaveProperty('value',window.location.origin+'/pay/'+request.id);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({amountStroops:'10000000',network:'TESTNET',invoiceReference:'INV-125'}));expect(service.prepare).not.toHaveBeenCalled();
+  });
+  it('uses a different permanent QR/payment link for each invoice and hides used QR codes',async()=>{
+    const service=adapter(),user=userEvent.setup();
+    const other:InvoiceDetail={...request,id:'0ab78012-1511-42ce-913b-97ad3ad993ef',invoiceReference:'INV-126',destination:address,walletId:'merchant',receipts:[],receiptsTruncated:false};
+    const open:InvoiceDetail={...request,destination:address,walletId:'merchant',receipts:[],receiptsTruncated:false};
+    const paid:InvoiceDetail={...open,status:'paid',paidStroops:open.amountStroops,remainingStroops:'0'};
+    const get=vi.fn(async (id:string)=>id===open.id?open:other);
+    service.invoices={create:vi.fn(),get,list:vi.fn(async()=>({items:[open,other]})),
+      unmatched:vi.fn(async()=>({items:[]})),allocate:vi.fn()};
+    mount(<Invoices/>,service);
+    await user.click(await screen.findByRole('button',{name:/INV-125 ·/}));
+    expect(await screen.findByTestId('qr-value')).toHaveProperty('textContent',window.location.origin+'/pay/'+open.id);
+    await user.click(screen.getByRole('button',{name:/INV-126 ·/}));
+    expect(await screen.findByTestId('qr-value')).toHaveProperty('textContent',window.location.origin+'/pay/'+other.id);
+    expect(open.id).not.toBe(other.id);
+    get.mockImplementation(async()=>paid);
+    await user.click(screen.getByRole('button',{name:/INV-125 ·/}));
+    await screen.findByText(/QR code is closed permanently/);
+    expect(screen.queryByTestId('qr-value')).toBeNull();
+    expect(screen.queryByRole('button',{name:'Copy invoice link'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Assign receipt to invoice'})).toBeNull();
+    expect(screen.getByText(/Unique payment request ID/).textContent).toContain(open.id);
+  });
+  it('shows paid QR links as permanently nonpayable when scanned',async()=>{
+    const invoice={...request,status:'paid' as const,paidStroops:request.amountStroops,remainingStroops:'0'};
+    const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify(invoice),{status:200,headers:{'Content-Type':'application/json'}}));
+    vi.stubGlobal('fetch',fetcher);
+    render(<MemoryRouter initialEntries={['/pay/'+request.id]}><PaymentContext.Provider value={null}>
+      <Routes><Route path="/pay/:requestId" element={<InvoiceCheckout/>}/></Routes>
+    </PaymentContext.Provider></MemoryRouter>);
+    expect(await screen.findByText(/This unique invoice QR has been used/)).toBeTruthy();
+    expect(screen.queryByText(/Sign in above with your email and passkey to pay this invoice/)).toBeNull();
   });
   it('requires explicit confirmation and an evidence note to allocate an unmatched receipt',async()=>{
     const service=adapter(),detail:InvoiceDetail={...request,destination:address,walletId:'merchant',receipts:[],receiptsTruncated:false};
