@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePayments } from './context';
-import { checkQuote, destinationError, explorerLink, statusLabel, stroops, xlm, type PayRun, type PayRunSummary, type PaymentAdapter, type Quote } from './model';
+import { checkQuote, destinationError, explorerLink, paymentBreakdown, statusLabel, stroops, xlm, type PayRun, type PayRunSummary, type PaymentAdapter, type Quote } from './model';
 
 export function Payroll() {
   const adapter = usePayments();
@@ -54,7 +54,8 @@ function PayRunScreen({ adapter }: { adapter: PaymentAdapter }) {
       <p id="payrun-help">One recipient per line, up to 50. Use internal references, not personal names. No header row. Only personal wallets that do not require a memo are supported. A saved reference cannot be reused for changed payments.</p>
       <button type="submit">Save pay run</button></fieldset></form>}
     {current && <section aria-label="Saved pay run"><h2>{current.reference}</h2><p>{current.confirmedCount} of {current.items.length} verified · Total {xlm(current.totalStroops)} XLM</p>
-      <p>Maximum sponsored fee per payment: {xlm(current.maxFeeStroops)} XLM. Payments settle individually, so a run can complete partially. Failed or uncertain lines are never replaced automatically.</p>
+      <p>Maximum network fee allowance per payment: {xlm(current.maxFeeStroops)} XLM, paid by the sponsor. Across {current.items.length} lines, the maximum aggregate sponsored fee allowance is {xlm((BigInt(current.maxFeeStroops) * BigInt(current.items.length)).toString())} XLM. The actual fee may be lower. No Cherry Wallet platform fee is charged. Payments settle individually and may complete partially.</p>
+      <p>PAYE, National Insurance, pension, employer costs and FX conversion are NOT calculated here. This is Testnet XLM disbursement, not a payroll tax computation or real salary payment.</p>
       <button disabled={busy} onClick={() => void act(async live => { setQuote(undefined); setAccepted(false); const value = await payroll.get(current.id); if (live()) setCurrent(value); })}>Refresh pay run</button>
       <div className="payroll-table"><table><thead><tr><th>Reference / recipient</th><th>XLM</th><th>Status</th><th>Action</th></tr></thead><tbody>{current.items.map(row => <tr key={row.reference}>
         <td>{row.reference}<small className="payroll-address">{row.destination}</small></td><td>{xlm(row.amountStroops)}</td><td>{row.attempt ? statusLabel(row.attempt) : 'Not prepared'}</td><td>
@@ -74,7 +75,7 @@ function PayRunScreen({ adapter }: { adapter: PaymentAdapter }) {
           {row.attempt && explorerLink(row.attempt) && <a href={explorerLink(row.attempt)} target="_blank" rel="noreferrer">Receipt</a>}
           {row.attempt && !explorerLink(row.attempt) && <Link to={`/history/${encodeURIComponent(row.attempt.id)}`}>Payment details</Link>}
         </td></tr>)}</tbody></table></div>
-      {quote && <section aria-label="Review payroll payment"><h3>Approve this recipient</h3><dl><dt>Destination</dt><dd>{quote.destination}</dd><dt>Amount</dt><dd>{xlm(quote.amountStroops)} XLM</dd><dt>Maximum sponsored fee</dt><dd>{xlm(quote.feeStroops)} XLM</dd><dt>Expires</dt><dd>{new Date(quote.expiresAt).toLocaleString()}</dd></dl>
+      {quote && <section aria-label="Review payroll payment"><h3>Approve this recipient</h3><dl><dt>Destination</dt><dd>{quote.destination}</dd><dt>Recipient receives</dt><dd>{xlm(paymentBreakdown(quote).transferStroops)} XLM</dd><dt>Cherry Wallet platform fee</dt><dd>{xlm(paymentBreakdown(quote).serviceFeeStroops)} XLM</dd><dt>Maximum network fee allowance</dt><dd>{xlm(paymentBreakdown(quote).maximumNetworkFeeStroops)} XLM ({quote.feePayer === 'sponsor' ? 'sponsor pays' : 'wallet pays'})</dd><dt>Maximum wallet debit</dt><dd>{xlm(paymentBreakdown(quote).maximumWalletDebitStroops)} XLM</dd><dt>Expires</dt><dd>{new Date(quote.expiresAt).toLocaleString()}</dd></dl>
         <label><input type="checkbox" checked={accepted} disabled={busy} onChange={e => setAccepted(e.target.checked)}/> I checked this recipient, amount, maximum fee and Testnet network.</label>
         <button disabled={busy || !accepted} onClick={() => void act(async live => {
           const reviewed = quote; setQuote(undefined); setAccepted(false);
