@@ -54,6 +54,7 @@ export function ApiReference() {
   const [section, setSection] = useState('All');
   const [copyState, setCopyState] = useState('');
   const baseUrl = window.location.origin + '/api/v1';
+  const fullUrl = (path: string) => window.location.origin + path;
   const openApiUrl = window.location.origin + '/api/v1/openapi.json';
   useEffect(() => {
     const controller = new AbortController();
@@ -130,8 +131,8 @@ export function ApiReference() {
               <summary><span className={'developer-method method-' + entry.method}>{entry.method.toUpperCase()}</span><span className="developer-path">{entry.path}</span><span className="developer-auth">{entry.auth ? 'Passkey session' : 'Public'}</span></summary>
               <div className="developer-operation-detail"><strong>{entry.title}</strong>{entry.description && <p>{entry.description}</p>}
                 <p><strong>Authorization:</strong> {entry.auth ? 'Bearer token issued after WebAuthn authentication; a wallet ID is not authorization.' : 'No bearer session required for this operation.'}</p>
-                <p><strong>Endpoint:</strong> <code>{baseUrl + entry.path.replace(/^\/api\/v1/, '')}</code></p>
-                <button type="button" className="secondary-button" onClick={() => void copy(baseUrl + entry.path.replace(/^\/api\/v1/, ''), 'Endpoint URL')}><ClipboardCopy size={15}/> Copy endpoint template</button>
+                <p><strong>Endpoint:</strong> <code>{fullUrl(entry.path)}</code></p>
+                <button type="button" className="secondary-button" onClick={() => void copy(fullUrl(entry.path), 'Endpoint URL')}><ClipboardCopy size={15}/> Copy endpoint template</button>
               </div>
             </details>)}
           </section> : null;
