@@ -219,9 +219,9 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   }
   return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
     addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
-    {showSetup && <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
-    <h2>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h2>
-    <p>{authenticated ? 'Your account is signed in. Check wallet deployment and funding below before sending or receiving.' : 'Get started with your email and device passkey. New accounts require a verified wallet deployment before payments are available.'}</p>
+    {showSetup && <section className="card payment-screen wallet-connect" aria-label="Payment service connection" aria-busy={busy}>
+    <h1>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h1>
+    <p>{authenticated ? 'Finish setting up your wallet to start making payments.' : 'One email. One passkey. Your own wallet for sending and receiving XLM.'}</p>
     {authenticated ? <><div className="onboarding-progress" aria-label="Wallet setup progress"><strong>Setup progress</strong><ol><li>✓ Email and passkey verified</li><li>{connected || deployment?.spendingEnabled ? "✓ Wallet verified and connected" : deployment?.address ? "Wallet deployed; payment activation pending" : deployment?.enabled === false ? "Wallet deployment unavailable" : "Wallet deployment pending verification"}</li><li>{deployment?.funding?.status === "FUNDED" ? "✓ Testnet funding confirmed" : deployment?.funding?.status === "PENDING" || deployment?.funding?.status === "SUBMITTED" ? "Testnet funding pending" : "Testnet funding optional / not confirmed"}</li></ol></div>
       {showAccountActions ? <><label htmlFor="profile-account-id">Account ID</label><input id="profile-account-id" value={accountId} readOnly/>
       <p>{credentialCount} {credentialCount === 1 ? 'passkey' : 'passkeys'} enrolled for sign-in.</p></> : <p>Your email is authenticated. Manage your account and passkeys in <Link to="/profile">Profile & settings</Link>.</p>}
@@ -244,7 +244,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
             <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
             {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
       </div>}
-      <h3>Security and recovery</h3><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p>
+      <details className="disclosure"><summary>About passkeys and recovery</summary><p>Add another sign-in passkey on a separate device if needed. This does not create an on-chain backup signer. If your primary signing passkey is lost, you may lose spending access even if you can sign in. Do not treat email or a second login passkey as wallet recovery.</p></details>
       {showAccountActions && <><button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Sign out and disconnect wallet</button></>}
     </> : <>
@@ -253,7 +253,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
         <input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/>
         <button type="submit">{busy ? 'Please wait…' : 'Continue with email'}</button>
       </fieldset></form>
-      <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
+      <p>Your device will ask for your passkey, or help create one for your first visit. Use a device with your existing passkey to return.</p>
     </>}
     {showAccountActions && accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
     {notice && <p role="status">{notice}</p>}

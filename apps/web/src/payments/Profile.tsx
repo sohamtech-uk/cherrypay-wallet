@@ -31,9 +31,9 @@ export function Profile() {
   return <div className="profile-page">
     <div className="heading"><div><span className="eyebrow">MY ACCOUNT</span><h1>Profile & settings</h1><p>Manage your email identity, wallet and passkey security.</p></div></div>
     <section className="card payment-screen" aria-label="Account profile">
-      <div className="profile-section-heading"><h2>Account information</h2><span className="wallet-pill">Email verified with passkey</span></div>
+      <div className="profile-section-heading"><h2>Account information</h2><span className="wallet-pill">Passkey account</span></div>
       <label htmlFor="profile-email">Email address / Account ID</label><input id="profile-email" value={account.accountId} readOnly/>
-      <p>Your email is the wallet account identifier. Changing it requires a verified account-migration process and is not supported here.</p>
+      <p>This email identifies your wallet account. Email changes are not currently supported.</p>
     </section>
     <section className="card payment-screen" aria-label="Wallet details">
       <div className="profile-section-heading"><h2><Wallet size={20}/> Wallet details</h2><span className="wallet-pill">Stellar Testnet</span></div>
@@ -63,6 +63,7 @@ export function Profile() {
       <button disabled={account.busy} type="button" onClick={() => void run(account.addPasskey)}>Add another passkey</button>
       <Link className="secondary-button" to="/security">Security & recovery guidance</Link>
     </section>
+    <details className="card payment-screen"><summary>More wallet tools</summary><div className="more-tools"><Link className="secondary-button" to="/onboarding">Wallet setup</Link><Link className="secondary-button" to="/payroll">Payroll</Link><Link className="secondary-button" to="/pay-from-another-chain">Cross-chain payments</Link><Link className="secondary-button" to="/recipient-intelligence">Recipient checks (read only)</Link></div></details>
     <section className="card payment-screen" aria-label="Account session">
       <h2>Session</h2><p>Passkey sessions expire within 30 minutes. Signing out removes authority from this browser session.</p>
       {account.error && <p role="alert" className="error">{account.error}</p>}
