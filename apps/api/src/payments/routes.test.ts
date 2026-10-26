@@ -96,3 +96,11 @@ it('activates only the authenticated owner and refreshes balance from the chain'
     expect(chain.balance).toHaveBeenCalledWith(wallet.address);
   } finally {await server.close();}
 });
+it('requires the authenticated owner and trusted origin for a durable reset',async()=>{
+ const server=await app(),key='route-reset-missing-key',url='/api/v1/wallets/wallet-1/attempt-by-key/'+key+'/reset';
+ try{
+   expect((await server.inject({method:'POST',url,headers:{origin:'https://evil.example'},payload:{}})).statusCode).toBe(403);
+   expect((await server.inject({method:'POST',url,headers,payload:{}})).json()).toEqual({network:'TESTNET',walletId:'wallet-1',key,reset:true,outcome:'not_created'});
+   expect((await server.inject({method:'POST',url:path,headers:{...headers,'idempotency-key':key},payload:intent})).statusCode).toBe(409);
+ }finally{await server.close();}
+});

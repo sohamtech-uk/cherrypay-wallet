@@ -12,6 +12,8 @@ export interface PaymentRepository {
   get(id: string): Promise<Attempt>;
   byKey(walletId: string, key: string): Promise<Attempt | undefined>;
   create(wallet: Wallet, intent: Intent, key: string): Promise<Attempt>;
+  /** Atomically find an existing attempt, or block a late create for an absent key. */
+  findOrBlockMissing(wallet:Wallet,key:string):Promise<Attempt|undefined>;
   claim(id: string, statuses: string[]): Promise<{ attempt: Attempt; token: string }>;
   /** Fenced write retaining lease. Used before any RPC with a possible external effect. */
   checkpoint(attempt: Attempt, token: string): Promise<void>;

@@ -3,7 +3,7 @@ import type { PaymentRepository } from './repository.js';
 import { digest, PaymentError, requireThat, spendingReady, TERMINAL, validateIntent, type Chain, type Intent, type PolicyReader, type Wallet } from './model.js';
 
 export class PaymentService {
-  constructor(readonly store: PaymentRepository, readonly chain: Chain, readonly policies: PolicyReader, readonly startLedger: number, readonly syncWallets?:()=>Promise<void>) {
+  constructor(readonly store: PaymentRepository, readonly chain: Chain, readonly policies: PolicyReader, readonly startLedger: number, readonly syncWallets?:()=>Promise<void>, readonly monitorWallets?:()=>Promise<void>) {
     requireThat(Number.isSafeInteger(startLedger) && startLedger > 0, 'START_LEDGER_REQUIRED');
   }
   private async policy(wallet: Wallet, fingerprint = wallet.policy) {
@@ -81,6 +81,17 @@ export class PaymentService {
     const { attempt: a, token } = await this.store.claim(id, ['preparing', 'awaiting_approval', 'authorizing']);
     a.status = 'rejected'; a.failureCode = 'USER_CANCELLED'; await this.store.finish(a, token); return a;
   }
+  async reset(owner:string,walletId:string,key:string) {
+    const wallet=await this.store.wallet(walletId,owner);
+    const prior=await this.store.findOrBlockMissing(wallet,key);
+    if(!prior)return {reset:true as const,outcome:'not_created' as const};
+    if(TERMINAL.includes(prior.status)) {
+      requireThat(prior.status!=='confirmed'||prior.verified,'TRANSFER_NOT_INDEPENDENTLY_VERIFIED');
+      return {reset:true as const,outcome:prior.status,attempt:prior};
+    }
+    const cancelled=await this.cancel(owner,walletId,prior.id);
+    return {reset:true as const,outcome:'cancelled' as const,attempt:cancelled};
+  }
   async reconcile(id: string) {
     const existing = await this.store.get(id); if (TERMINAL.includes(existing.status)) return existing;
     const { attempt: a, token } = await this.store.claim(id, ['ready', 'pending', 'unknown']);
@@ -125,6 +136,7 @@ export class PaymentService {
       } catch { /* Concurrent worker or unavailable dependency: retain durable state. */ }
     }
     await this.syncWallets?.();
+    if(this.monitorWallets){await this.monitorWallets();return;}
     const cursor = await this.store.cursor();
     const page = await this.chain.events(cursor, this.startLedger);
     await this.store.ingest(page.events, cursor, page.cursor);

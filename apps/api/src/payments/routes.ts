@@ -83,6 +83,11 @@ export async function registerPaymentRoutes(app: FastifyInstance, dependencies?:
       const { service, wallet } = await context(request); const a = await service.store.byKey(wallet.id, (request.params as { key: string }).key);
       requireThat(a, 'ATTEMPT_NOT_FOUND', 404); return publicAttempt(a);
     });
+    scope.post('/api/v1/wallets/:walletId/attempt-by-key/:key/reset', { schema: { params: {type:'object',required:['walletId','key'],additionalProperties:false,properties:{walletId:identifier,key:{...identifier,minLength:16}}}, body:{type:'object',additionalProperties:false} } },async request=>{
+      const {service,owner,wallet}=await context(request),key=(request.params as {key:string}).key;
+      const result=await service.reset(owner,wallet.id,key);
+      return {network:'TESTNET',walletId:wallet.id,key,reset:result.reset,outcome:result.outcome,...(result.attempt?{attempt:publicAttempt(result.attempt)}:{})};
+    });
     scope.get('/api/v1/wallets/:walletId/attempts/:attemptId', { schema: { params: paymentSchemas.attempt } }, async request => {
       const { service, owner, wallet, id } = await context(request); return publicAttempt(await service.get(owner, wallet.id, id));
     });
