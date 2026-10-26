@@ -28,12 +28,20 @@ async function signIn(user:ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/(?:Email address \(Account ID\)|Account ID)/),'alice@example.com');
   await user.click(screen.getByRole('button',{name:/Continue with email|Connect with passkey/}));
 }
-it('uses email-only passkey onboarding and never offers legacy account IDs',async()=>{
-  const fetcher=fixture();const user=userEvent.setup();render(<PaymentConnection onConnect={vi.fn()}/>);
+it.each([true,false])('uses email-only passkey onboarding with or without saved email (saved: %s)',async(saved)=>{
+  if(saved)localStorage.setItem('cherrypay:testnet:account-id','alice@example.com');
+  const fetcher=fixture(),user=userEvent.setup(),onConnect=vi.fn();
+  render(<PaymentConnection onConnect={onConnect}/>);
   expect(screen.queryByRole('checkbox',{name:'Use a legacy account ID'})).toBeNull();
-  expect(screen.getByLabelText('Email address (Account ID)')).toHaveProperty('type','email');
-  await signIn(user);await screen.findByText(/Wallet connected/);
+  const emailInput=screen.getByLabelText('Email address (Account ID)');
+  expect(emailInput).toHaveProperty('type','email');
+  if(saved) expect(emailInput).toHaveProperty('value','alice@example.com');
+  else await user.type(emailInput,'alice@example.com');
+  await user.click(screen.getByRole('button',{name:'Continue with email'}));
+  await screen.findByText(/Wallet connected/);
   expect(fetcher).toHaveBeenCalledWith('/api/v1/passkeys/onboarding/options',expect.objectContaining({body:JSON.stringify({email:'alice@example.com'})}));
+  expect(startAuthentication).toHaveBeenCalledTimes(1);
+  expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({address}));
 });
 it('discovers the owned wallet after passkey login without asking for a wallet ID or storing its token',async()=>{
   const fetcher=fixture(), local=vi.spyOn(Storage.prototype,'setItem'),onConnect=vi.fn();
