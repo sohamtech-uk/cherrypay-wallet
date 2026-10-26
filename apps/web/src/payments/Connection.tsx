@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
@@ -5,12 +6,12 @@ import { parseDeployment, type DeploymentView } from './deployment';
 import type { PaymentAdapter } from './model';
 
 const accountStorageKey = 'cherrypay:testnet:account-id';
-const legacyAccountId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function savedAccountId() { try { return localStorage.getItem(accountStorageKey) ?? ''; } catch { return ''; } }
 async function revoke(value: string) { await apiClient(() => value)('session/logout', {}); }
 
 /** Only the public account ID is remembered. Session authority stays in memory. */
 export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: PaymentAdapter | null): void; signer?: TransferSigner }) {
+  const { pathname } = useLocation();
   const token = useRef<string | undefined>(undefined);
   const deadline = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -19,7 +20,6 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
   const lock = useRef(false);
   const [accountId, setAccountId] = useState(savedAccountId);
   const [email, setEmail] = useState(savedAccountId);
-  const [legacyLogin, setLegacyLogin] = useState(() => legacyAccountId.test(savedAccountId()));
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -115,10 +115,10 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     const api = apiClient(() => undefined);
     let creating=false;
     try {
-      const challenge = object(await api(legacyLogin ? 'passkeys/authentication/options' : 'passkeys/onboarding/options', legacyLogin ? {accountID:owner} : {email:owner}));
+      const challenge = object(await api('passkeys/onboarding/options', {email:owner}));
       if (generation.current !== id) return;
-      if (!legacyLogin && (challenge.accountID !== owner || !['register','authenticate'].includes(String(challenge.mode)))) throw Error('Invalid sign-in response.');
-      creating = !legacyLogin && challenge.mode === 'register';
+      if (challenge.accountID !== owner || !['register','authenticate'].includes(String(challenge.mode))) throw Error('Invalid sign-in response.');
+      creating = challenge.mode === 'register';
       setAccountId(owner);
       try {localStorage.setItem(accountStorageKey,owner);} catch {setNotice('This browser cannot save your account ID. Use your email to sign in again.');}
       const response = creating
@@ -206,6 +206,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     try { await navigator.clipboard.writeText(accountId); setNotice('Account ID copied. Keep it for sign-in; it cannot replace a passkey.'); }
     catch { setError('Copy failed. Select the account ID and copy it manually.'); }
   }
+  if (authenticated && pathname !== '/profile') return null;
   return <section className="card payment-screen" aria-label="Payment service connection" aria-busy={busy}>
     <h2>{authenticated ? 'Your passkey profile' : 'Connect or create a passkey profile'}</h2>
     <p>Use your email address and passkey to find your Testnet wallet. Where automatic deployment is enabled, your verified primary passkey is bound to a new C-address. Registration never funds a wallet.</p>
@@ -236,11 +237,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
     </> : <>
       <form onSubmit={e => void connect(e)}><fieldset disabled={busy}>
-        <label><input type="checkbox" checked={legacyLogin} onChange={e => setLegacyLogin(e.target.checked)}/>Use a legacy account ID</label>
-        <label htmlFor="account-id">{legacyLogin ? 'Existing account ID' : 'Email address (Account ID)'}</label>
-        <input id="account-id" type={legacyLogin ? 'text' : 'email'} value={email} onChange={e => setEmail(e.target.value)} required autoComplete={legacyLogin ? 'off' : 'email'}/>
-        {legacyLogin && <p>Use the account ID saved when you created your original passkey profile. Your existing passkey is still required.</p>}
-        <button type="submit">{busy ? 'Please wait…' : (legacyLogin ? 'Connect with passkey' : 'Continue with email')}</button>
+        <label htmlFor="account-id">Email address (Account ID)</label>
+        <input id="account-id" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/>
+        <button type="submit">{busy ? 'Please wait…' : 'Continue with email'}</button>
       </fieldset></form>
       <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
     </>}
