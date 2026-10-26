@@ -83,6 +83,8 @@ export class InvoiceService {
     const { rows } = await this.pool.query(`SELECT e.id AS "eventId",e.transaction_hash AS "transactionHash",e.from_address AS "from",e.amount_stroops::text AS "amountStroops",e.ledger,e.closed_at AS "closedAt"
       FROM wallet_transfer_events e WHERE e.to_address=$1 AND NOT EXISTS(SELECT 1 FROM wallet_invoice_allocations a WHERE a.event_id=e.id)
       AND NOT EXISTS(SELECT 1 FROM wallet_payment_attempts p WHERE p.payment_request_id IS NOT NULL AND p.transaction_hash=e.transaction_hash)
+      AND NOT EXISTS(SELECT 1 FROM wallet_friendbot_funding f WHERE f.transaction_hash=e.transaction_hash)
+      AND NOT EXISTS(SELECT 1 FROM wallet_contract_funding f WHERE f.transaction_hash=e.transaction_hash)
       AND ($2::bigint IS NULL OR (e.ledger,e.id)<($2::bigint,$3::text)) ORDER BY e.ledger DESC,e.id DESC LIMIT 21`,[wallet.address,prior?.ledger??null,before??null]);
     return {network:NETWORK,items:rows.slice(0,20).map(r=>({...r,ledger:Number(r.ledger),closedAt:Number(r.closedAt)})),nextCursor:rows.length>20?rows[19].eventId:undefined};
   }
@@ -99,11 +101,31 @@ export class InvoiceService {
       const event = (await client.query('SELECT * FROM wallet_transfer_events WHERE id=$1 FOR UPDATE',[eventId])).rows[0];
       requireThat(event && event.to_address === request.destination && request.network===NETWORK && request.asset_contract===NATIVE_SAC,'RECEIPT_DOES_NOT_MATCH_INVOICE');
       const prior = (await client.query('SELECT request_id FROM wallet_invoice_allocations WHERE event_id=$1',[eventId])).rows[0];
-      if (prior) { requireThat(prior.request_id===id,'RECEIPT_ALREADY_ALLOCATED'); return; }
+      if (prior) {
+        requireThat(prior.request_id===id,'RECEIPT_ALREADY_ALLOCATED');
+        // A worker repeating the same confirmed event is harmless. A second
+        // merchant allocation is rejected, even when it names the first receipt.
+        requireThat(!manual,'INVOICE_ALREADY_PAID');
+        return;
+      }
+      const allocated = await client.query('SELECT 1 FROM wallet_invoice_allocations WHERE request_id=$1 LIMIT 1',[id]);
+      requireThat(allocated.rowCount===0,'INVOICE_ALREADY_PAID');
+      // One immutable request ID / QR maps to ONE exact native-XLM receipt.
+      // Partial, split, late excess and second receipts never settle an invoice.
+      requireThat(String(event.amount_stroops)===String(request.amount_stroops),'INVOICE_EXACT_AMOUNT_REQUIRED');
+      const funded = await client.query(`SELECT 1 FROM wallet_friendbot_funding WHERE transaction_hash=$1
+        UNION ALL SELECT 1 FROM wallet_contract_funding WHERE transaction_hash=$1 LIMIT 1`,[event.transaction_hash]);
+      requireThat(funded.rowCount===0,'SYSTEM_FUNDING_CANNOT_SETTLE_INVOICE');
       const attempts = await client.query('SELECT * FROM wallet_payment_attempts WHERE transaction_hash=$1 AND payment_request_id IS NOT NULL',[event.transaction_hash]);
       let attemptId: string | null = null;
       if (manual) {
         requireThat(attempts.rowCount===0,'RECEIPT_RESERVED_FOR_CHECKOUT');
+        // A submitted/unknown invoice transfer could still land on-chain.
+        // Never manually settle the same invoice with a different deposit
+        // until that existing attempt is conclusively failed or cancelled.
+        const unresolved = await client.query(`SELECT 1 FROM wallet_payment_attempts WHERE payment_request_id=$1
+          AND status NOT IN ('failed','rejected') LIMIT 1`,[id]);
+        requireThat(unresolved.rowCount===0,'INVOICE_PAYMENT_UNRESOLVED');
       } else {
         const a=attempts.rows.find(a=>a.payment_request_id===id && a.event_id===eventId);
         requireThat(a && a.status==='confirmed' && a.verified && a.source_address===event.from_address && a.intent.network===NETWORK && a.intent.destination===event.to_address && a.intent.amountStroops===String(event.amount_stroops),'INVOICE_TRANSFER_NOT_VERIFIED');
