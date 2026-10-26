@@ -244,7 +244,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
       const value = object(await apiClient(() => token.current)('wallet/email-verification/request', {}));
       if (value.status !== 'sent' && value.status !== 'already_verified') throw Error('Verification email could not be confirmed.');
       if (value.status === 'already_verified') setEmailVerified(true);
-      setNotice(value.status === 'already_verified' ? 'Your email is already verified.' : 'An 8-digit verification code was sent. Check your email; it expires in 15 minutes.');
+      setNotice(value.status === 'already_verified' ? 'Your email is already verified.' : 'The email provider accepted your verification request. Check your inbox and junk folder for an 8-digit code; it expires in 15 minutes.');
     });
   }
   async function confirmEmailVerification(code: string) {

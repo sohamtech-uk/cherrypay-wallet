@@ -2,9 +2,17 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import { invoiceAdapter } from '../invoices/api';
 import { addressKind, checkQuote, destinationError, NETWORK, type Attempt, type AttemptStatus, type Intent, type PaymentAdapter, type Quote, type RouteKind, type PayRun, type PayRunInput, type ResolvedRecipient } from './model';
 
+const recipientErrorMessages: Record<string, string> = {
+  EMAIL_DELIVERY_UNAVAILABLE: 'We could not send your verification email. Please try again later. You can still pay by Stellar address.',
+  INVALID_OR_EXPIRED_CODE: 'That verification code is invalid or expired. Check your latest email or request a new code.',
+  RATE_LIMITED: 'Too many requests. Wait a minute before trying again.',
+  RECIPIENT_NOT_AVAILABLE: 'This email cannot receive payments yet. Ask the recipient to verify their email and enable pay-by-email discovery, or use their Stellar address.',
+  RECIPIENT_DIRECTORY_UNAVAILABLE: 'The email verification service is temporarily unavailable. Please try again later.',
+};
 export class ApiError extends Error {
   constructor(public status: number, public code: string) {
-    super(status === 401 ? 'Your session expired. Reconnect with your passkey.' : status === 503 ? 'The payment service is unavailable or not yet enabled. Check existing attempts before retrying.' : `Wallet request could not complete (${code}).`);
+    super(status === 401 ? 'Your session expired. Reconnect with your passkey.' : recipientErrorMessages[code] ??
+      (status === 503 ? 'The payment service is unavailable or not yet enabled. Check existing attempts before retrying.' : `Wallet request could not complete (${code}).`));
   }
 }
 export function apiClient(token: () => string | undefined, transport: typeof fetch = fetch) {

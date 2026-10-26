@@ -32,7 +32,7 @@ describe('invoice checkout',()=>{
     mount(<Send request={request}/>,service);
     // The public invoice includes one navigation link, then the two read-only fields.
     await user.tab(); await user.tab(); await user.tab(); await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button',{name:'Preview payment'}));
+    expect(document.activeElement).toBe(screen.getByRole('button',{name:'Review payment'}));
     await user.keyboard('{Enter}');
     await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('heading',{name:'Review and approve'})));
     expect(screen.getByText('0.0000100 XLM · sponsor pays, up to this limit')).toBeTruthy();
@@ -60,7 +60,7 @@ describe('invoice checkout',()=>{
     vi.mocked(service.createAttempt).mockResolvedValue(attempt);
     vi.mocked(service.approve).mockRejectedValue(Error('Connection interrupted. Check the existing payment.'));
     const view=mount(<Send request={request}/>,service);
-    await user.click(screen.getByRole('button',{name:'Preview payment'}));
+    await user.click(screen.getByRole('button',{name:'Review payment'}));
     await user.click(await screen.findByRole('checkbox'));
     await user.click(screen.getByRole('button',{name:'Approve exact payment'}));
     await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('alert')));
@@ -70,7 +70,7 @@ describe('invoice checkout',()=>{
     vi.mocked(service.getAttemptByKey).mockResolvedValue({...attempt,status:'unknown'});
     mount(<Send request={request}/>,service);
     await screen.findByText('Outcome unknown — check status before retrying');
-    expect(screen.queryByRole('button',{name:'Preview payment'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Review payment'})).toBeNull();
     expect(screen.queryByRole('button',{name:'Start a new payment'})).toBeNull();
     expect(localStorage.getItem(storageKey)).toBe(saved);
     expect(service.prepare).toHaveBeenCalledTimes(1);expect(service.approve).toHaveBeenCalledTimes(1);
@@ -79,25 +79,25 @@ describe('invoice checkout',()=>{
     const service=adapter();mount(<Send request={request}/>,service);
     expect(screen.getByLabelText('Recipient address')).toHaveProperty('readOnly',true);
     expect(screen.getByLabelText('Exact amount (XLM)')).toHaveProperty('value','1.0000000');
-    await userEvent.click(screen.getByRole('button',{name:'Preview payment'}));
+    await userEvent.click(screen.getByRole('button',{name:'Review payment'}));
     await screen.findByRole('button',{name:'Approve exact payment'});
     expect(service.prepare).toHaveBeenCalledWith(expect.objectContaining({paymentRequestId:request.id,destination,amountStroops:'10000000'}),expect.any(String));
     expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeTruthy();
     expect(service.approve).not.toHaveBeenCalled();
   });
   it.each([{...request,expired:true},{...request,paymentPending:true},{...request,status:'paid' as const,paidStroops:'10000000',remainingStroops:'0'}])('blocks fresh payment for unavailable requests',r=>{
-    mount(<Send request={r}/>,adapter());expect(screen.getByRole('button',{name:'Preview payment'})).toHaveProperty('disabled',true);
+    mount(<Send request={r}/>,adapter());expect(screen.getByRole('button',{name:'Review payment'})).toHaveProperty('disabled',true);
   });
   it('preserves an unknown saved payment instead of preparing another invoice',async()=>{
     localStorage.setItem(`cherrypay:pending:TESTNET:${address}`,'existing-payment-key');const service=adapter();mount(<Send request={request}/>,service);
-    expect(screen.queryByRole('button',{name:'Preview payment'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Review payment'})).toBeNull();
     await userEvent.click(screen.getByRole('button',{name:'Check existing attempt'}));
     await screen.findByText('The attempt is not yet available. Check again later; do not submit a replacement.');expect(service.prepare).not.toHaveBeenCalled();
   });
   it('loads public terms before sign-in and rejects a link response for a different invoice',async()=>{
     const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify({...request,id:'a'.repeat(36)}),{status:200,headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetcher);
     render(<MemoryRouter initialEntries={['/pay/'+request.id]}><PaymentContext.Provider value={null}><Routes><Route path="/pay/:requestId" element={<InvoiceCheckout/>}/></Routes></PaymentContext.Provider></MemoryRouter>);
-    await screen.findByText(/Payment request identity mismatch/);expect(screen.queryByRole('button',{name:'Preview payment'})).toBeNull();
+    await screen.findByText(/Payment request identity mismatch/);expect(screen.queryByRole('button',{name:'Review payment'})).toBeNull();
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/payment-requests/'+request.id);
   });
   it('rejects a quote if its invoice metadata changes even when recipient and amount agree',()=>{
