@@ -26,6 +26,20 @@ export function destinationError(value: string, supported: RouteKind[]): string 
 }
 export type Intent = { network: typeof NETWORK; from: string; destination: string; amountStroops: string; paymentRequestId?: string };
 export type Quote = Intent & { id: string; feeStroops: string; feePayer: 'wallet' | 'sponsor'; spendableStroops: string; expiresAt: string };
+export type ResolvedRecipient = { network: typeof NETWORK; email: string; address: string; mailboxVerified: true; walletBindingVerified: true; legalIdentityVerified: false };
+/** All figures are in exact stroops. Quoted fee is an ALLOWANCE, not an actual charged fee. */
+export function paymentBreakdown(quote: Quote) {
+  const transfer = BigInt(quote.amountStroops), feeLimit = BigInt(quote.feeStroops);
+  const walletNetworkFeeLimit = quote.feePayer === 'wallet' ? feeLimit : 0n;
+  return {
+    transferStroops: transfer.toString(),
+    serviceFeeStroops: '0', // No wallet platform fee is collected by the current native-XLM payment engine.
+    maximumNetworkFeeStroops: feeLimit.toString(),
+    walletNetworkFeeLimitStroops: walletNetworkFeeLimit.toString(),
+    sponsorNetworkFeeLimitStroops: (feeLimit-walletNetworkFeeLimit).toString(),
+    maximumWalletDebitStroops: (transfer+walletNetworkFeeLimit).toString(),
+  };
+}
 export type AttemptStatus = 'awaiting_approval' | 'submitted' | 'pending' | 'unknown' | 'confirmed' | 'failed' | 'rejected';
 export type Attempt = Intent & { id: string; status: AttemptStatus; createdAt: string; feeStroops: string; feeKnown?: boolean; transactionHash?: string; verified: boolean; failureMessage?: string };
 export function checkQuote(quote: Quote, intent: Intent): void {
@@ -53,6 +67,7 @@ export interface PaymentAdapter {
   persistentPreview?: boolean;
   payroll?: PayrollAdapter;
   invoices?: InvoiceAdapter;
+  resolveRecipientEmail?(email: string): Promise<ResolvedRecipient>;
   getBalance?(): Promise<{ amountStroops: string; ledger: number; updatedAt: number } | null>;
   getQuote?(id: string): Promise<Quote>;
   cancelAttempt?(id: string): Promise<Attempt>;
