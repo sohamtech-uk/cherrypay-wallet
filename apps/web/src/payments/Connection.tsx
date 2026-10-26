@@ -58,7 +58,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
       if (!active(id)) return;
       const view = parseDeployment(value);
       setDeployment(view); setDeploymentStatus(view.status);
-      if (view.enabled && ['PENDING','SUBMITTED'].includes(view.status)) {
+      if (view.enabled && (['PENDING','SUBMITTED'].includes(view.status) || ['PENDING','SUBMITTED'].includes(view.funding?.status ?? ''))) {
         poll.current = setTimeout(() => { void loadDeployment(id); }, 5000);
       }
     } catch (e) {
@@ -80,7 +80,7 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     }
     if (!active(id)) return;
     setWallets(owned); setWalletId(owned[0]?.id ?? ''); setDeploymentStatus(''); setDeployment(null);
-    if (owned.length === 0) await loadDeployment(id, true);
+    await loadDeployment(id, owned.length === 0);
     if (owned.length === 1) await openWallet(owned[0], id);
   }
   async function adoptSession(value: unknown, owner: string, id: number) {
@@ -113,14 +113,23 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     event.preventDefault(); if (lock.current) return;
     const id = ++generation.current, owner = email.trim().toLowerCase(); lock.current = true; setBusy(true); setError(''); setNotice('');
     const api = apiClient(() => undefined);
+    let creating=false;
     try {
-      const challenge = object(await api('passkeys/authentication/options', { accountID: owner }));
+      const challenge = object(await api(legacyLogin ? 'passkeys/authentication/options' : 'passkeys/onboarding/options', legacyLogin ? {accountID:owner} : {email:owner}));
       if (generation.current !== id) return;
-      const response = await startAuthentication({ optionsJSON: challenge.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+      if (!legacyLogin && (challenge.accountID !== owner || !['register','authenticate'].includes(String(challenge.mode)))) throw Error('Invalid sign-in response.');
+      creating = !legacyLogin && challenge.mode === 'register';
+      setAccountId(owner);
+      try {localStorage.setItem(accountStorageKey,owner);} catch {setNotice('This browser cannot save your account ID. Use your email to sign in again.');}
+      const response = creating
+        ? await startRegistration({optionsJSON:challenge.options as Parameters<typeof startRegistration>[0]['optionsJSON']})
+        : await startAuthentication({optionsJSON:challenge.options as Parameters<typeof startAuthentication>[0]['optionsJSON']});
       if (generation.current !== id) return;
-      const session = await api('passkeys/authentication/verify', { accountID: owner, requestID: text(challenge.requestID), response });
-      if (await adoptSession(session, owner, id)) { setAccountId(owner); await loadWallets(id); }
-    } catch (e) { await fail(id, e); }
+      const session = await api(creating ? 'passkeys/registration/verify' : 'passkeys/authentication/verify', { accountID: owner, requestID: text(challenge.requestID), response });
+      if (await adoptSession(session, owner, id)) {
+        await loadWallets(id);
+      }
+    } catch (e) { await fail(id, e, creating); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
   async function register(additional: boolean) {
@@ -169,6 +178,20 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
     try { await loadDeployment(id, deploymentStatus === 'NOT_STARTED'); }
     finally { if (generation.current === id) { lock.current = false; setBusy(false); } }
   }
+  async function fundTestnet() {
+    const id=generation.current;
+    if(lock.current||!active(id))return;
+    lock.current=true;setBusy(true);setError('');
+    try {
+      await apiClient(()=>token.current)('smart-account/funding',{});
+      if(active(id))await loadDeployment(id);
+    } catch(e) {
+      if(active(id)) {
+        if(e instanceof ApiError&&e.status===401)clearSession('Your session expired. Reconnect with your passkey.');
+        else setError('Testnet funding is unavailable. No allocation has been confirmed. Refresh the status before trying again.');
+      }
+    } finally {if(generation.current===id){lock.current=false;setBusy(false);}}
+  }
   async function disconnect() {
     const abandoned = token.current;
     clearSession(); setNotice(''); const id = generation.current;
@@ -192,10 +215,18 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
           <p role="status">C-address deployed. Your primary passkey signer binding is verified on Stellar Testnet.</p>
           <label htmlFor="deployed-contract">Deployed C-address</label><input id="deployed-contract" value={deployment.address} readOnly/>
           <p>Deployment ledger: {deployment.ledger}. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.transactionHash}`} target="_blank" rel="noreferrer">View deployment transaction</a></p>
-          <p>Payments and funding instructions remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
+          <p>Payments remain unavailable until an independent backup is enrolled on-chain and recovery is verified.</p>
         </> : <p role="status">No deployed C-address wallet is linked to this account yet. Provisioning status: {deploymentStatus || 'NOT_STARTED'}. {deployment?.enabled ? 'Automatic Testnet deployment is processing; confirmation and signer verification are required.' : 'Deployment status has not been verified. Do not fund a predicted address.'}</p>}
         <button className="secondary-button" disabled={busy} onClick={() => void refreshDeployment()}>Refresh deployment status</button>
       </> : <form onSubmit={e => void choose(e)}><fieldset disabled={busy}><label htmlFor="owned-wallet">Choose your wallet</label><select id="owned-wallet" value={walletId} onChange={e => setWalletId(e.target.value)}>{wallets.map(w => <option key={w.id} value={w.id}>{w.address}</option>)}</select><button type="submit">Open wallet</button></fieldset></form>}
+      {deployment?.address && <div aria-label="Testnet funding">
+        {deployment.funding?.status === 'FUNDED' ? <p role="status">100,000 Testnet XLM allocated. <a href={`https://stellar.expert/explorer/testnet/tx/${deployment.funding.transactionHash}`} target="_blank" rel="noreferrer">View funding transaction</a></p>
+          : deployment.funding?.status === 'PENDING' || deployment.funding?.status === 'SUBMITTED' ? <p role="status">Your 100,000 Testnet XLM allocation is pending confirmation.</p>
+          : deployment.funding?.status === 'FAILED' ? <p role="alert">The Testnet funding transaction failed. Contact the operator for review.</p>
+          : <><p>Your C-wallet is ready. Request a one-time allocation of 100,000 Testnet XLM. Test tokens have no monetary value.</p>
+            <button disabled={busy || !deployment.funding} onClick={()=>void fundTestnet()}>Fund Testnet wallet</button>
+            {!deployment.funding && <p>Testnet funding is not configured by the operator yet.</p>}</>}
+      </div>}
       <p>Add an independent passkey on another device or security key. Off-chain enrollment alone does not add a backup on-chain signer or verify recovery.</p>
       <button disabled={busy} onClick={() => void register(true)}>Add another passkey</button>
       <button className="secondary-button" onClick={() => void disconnect()}>Disconnect wallet</button>
@@ -205,10 +236,9 @@ export function PaymentConnection({ onConnect, signer }: { onConnect(adapter: Pa
         <label htmlFor="account-id">{legacyLogin ? 'Existing account ID' : 'Email address (Account ID)'}</label>
         <input id="account-id" type={legacyLogin ? 'text' : 'email'} value={email} onChange={e => setEmail(e.target.value)} required autoComplete={legacyLogin ? 'off' : 'email'}/>
         {legacyLogin && <p>Use the account ID saved when you created your original passkey profile. Your existing passkey is still required.</p>}
-        <button type="submit">{busy ? 'Please wait…' : 'Connect with passkey'}</button>
+        <button type="submit">{busy ? 'Please wait…' : (legacyLogin ? 'Connect with passkey' : 'Continue with email')}</button>
       </fieldset></form>
-      <button className="secondary-button" disabled={busy || legacyLogin} onClick={() => void register(false)}>Create passkey profile</button>
-      <p>New here? Create a profile, save its account ID, then add another passkey. Your device manages the passkeys.</p>
+      <p>Enter your email to sign in with your existing passkey or create your first one. Your device will ask you to confirm. If an existing passkey is unavailable, use a device that has it; a replacement is not created automatically.</p>
     </>}
     {accountId && <button className="secondary-button" onClick={() => void copyAccount()}>Copy account ID</button>}
     {notice && <p role="status">{notice}</p>}

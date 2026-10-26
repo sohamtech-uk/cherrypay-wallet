@@ -80,3 +80,19 @@ describe('per-user C-address provisioning reservation', () => {
     }
   });
 });
+
+it('funding requires an authenticated session and cannot take a caller-supplied owner, amount or address',async()=>{
+  const queue=vi.fn(async()=>({status:'PENDING',amountStroops:'1000000000000'}));
+  const app=Fastify({ajv:{customOptions:{removeAdditional:false}}});
+  const {AutomaticDeploymentService}=await import('./automatic-deployment.js');
+  await registerSmartAccountRoutes(app,{origin:'http://localhost',deployments:{funding:{queue}} as unknown as InstanceType<typeof AutomaticDeploymentService>});
+  const url='/api/v1/smart-account/funding',headers={...auth,origin:'http://localhost'};
+  mocks.sessionAccount.mockResolvedValue(null);
+  expect((await app.inject({method:'POST',url,headers,payload:{}})).statusCode).toBe(401);
+  mocks.sessionAccount.mockResolvedValue('owner-1');
+  expect((await app.inject({method:'POST',url,headers:{...headers,origin:'http://foreign'},payload:{}})).statusCode).toBe(403);
+  for(const payload of [{owner:'foreign'},{address:'foreign'},{amountStroops:'1'}])expect((await app.inject({method:'POST',url,headers,payload})).statusCode).toBe(400);
+  expect(queue).not.toHaveBeenCalled();
+  expect((await app.inject({method:'POST',url,headers,payload:{}})).statusCode).toBe(202);
+  expect(queue).toHaveBeenCalledWith('owner-1');await app.close();
+});

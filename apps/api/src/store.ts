@@ -20,6 +20,12 @@ export async function createAccount(email?: string) {
   await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2)',[id,userID]);
   return {id,webauthn_user_id:userID};
 }
+/** Resume an interrupted first enrollment without replacing the WebAuthn user handle. */
+export async function getOrCreateEmailAccount(email: string) {
+  const id = normalizeEmail(email);
+  await pool.query('INSERT INTO wallet_accounts(id,webauthn_user_id) VALUES($1,$2) ON CONFLICT(id) DO NOTHING', [id,randomBytes(32).toString('base64url')]);
+  return (await getAccountByEmail(id))!;
+}
 /** Normalized email is the canonical account ID and permanent ownership key. */
 export function normalizeEmail(value: string): string {
   const email = value.trim().toLowerCase();

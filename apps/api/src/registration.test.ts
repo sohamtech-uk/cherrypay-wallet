@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  createAccount: vi.fn(), getAccount: vi.fn(), getCredentials: vi.fn(), newChallenge: vi.fn(),
+  getOrCreateEmailAccount: vi.fn(), createAccount: vi.fn(), getAccount: vi.fn(), getCredentials: vi.fn(), newChallenge: vi.fn(),
   generateRegistrationOptions: vi.fn(), generateAuthenticationOptions: vi.fn(),
 }));
 vi.mock('./store.js', () => mocks);
 vi.mock('@simplewebauthn/server', () => ({ ...mocks, verifyRegistrationResponse: vi.fn(), verifyAuthenticationResponse: vi.fn() }));
-import { beginRegistration, beginAuthentication } from './registration.js';
+import { beginEmailOnboarding, beginRegistration, beginAuthentication } from './registration.js';
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.createAccount.mockResolvedValue({ id: 'server-generated-account', webauthn_user_id: Buffer.from('user-id').toString('base64url') });
@@ -36,3 +36,17 @@ describe('PostgreSQL enrollment wiring regression', () => {
   });
 });
 
+
+describe('email-first onboarding',()=>{
+ beforeEach(()=>{mocks.getOrCreateEmailAccount.mockResolvedValue({id:'alice@example.test',webauthn_user_id:Buffer.from('stable-user').toString('base64url')});});
+ it('creates or resumes a first enrollment using the persistent user handle',async()=>{
+  expect(await beginEmailOnboarding('localhost','alice@example.test')).toMatchObject({mode:'register',accountID:'alice@example.test'});
+  expect(mocks.newChallenge).toHaveBeenCalledWith('alice@example.test','register_initial','registration-challenge',undefined);
+ });
+ it('selects authentication when credentials already exist, without issuing an enrollment challenge',async()=>{
+  mocks.getCredentials.mockResolvedValue([{id:'existing-key',transports:['internal']}]);
+  expect(await beginEmailOnboarding('localhost','alice@example.test')).toMatchObject({mode:'authenticate',accountID:'alice@example.test'});
+  expect(mocks.generateRegistrationOptions).not.toHaveBeenCalled();
+  expect(mocks.newChallenge).toHaveBeenCalledWith('alice@example.test','authenticate','authentication-challenge');
+ });
+});

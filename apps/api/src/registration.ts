@@ -1,13 +1,23 @@
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import type {RegistrationResponseJSON,AuthenticationResponseJSON} from '@simplewebauthn/types';
 import * as store from './store.js';
+export async function beginEmailOnboarding(rpID:string,email:string) {
+ const account=await store.getOrCreateEmailAccount(email);
+ const credentials=await store.getCredentials(account.id);
+ if(credentials.length) return {mode:'authenticate' as const,accountID:account.id,...await beginAuthentication(account.id,rpID)};
+ return {mode:'register' as const,...await initialRegistrationOptions(rpID,account,credentials)};
+}
+async function initialRegistrationOptions(rpID:string,account:{id:string;webauthn_user_id:string},credentials:Awaited<ReturnType<typeof store.getCredentials>>,accountID?:string,token?:string) {
+ const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',supportedAlgorithmIDs:[-7],authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
+ return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
+}
 export async function beginRegistration(rpID:string,accountID?:string,token?:string,email?:string){
  const account=accountID?await store.getAccount(accountID):await store.createAccount(email);
  if(!account)throw Error('Account not found');
  const credentials=await store.getCredentials(account.id);
  if(accountID&&(!token||!credentials.length))throw Error('Existing passkey authentication required');
- const options=await generateRegistrationOptions({rpName:'Cherry Pay Wallet Testnet',rpID,userID:new Uint8Array(Buffer.from(account.webauthn_user_id,'base64url')),userName:account.id,attestationType:'none',supportedAlgorithmIDs:[-7],authenticatorSelection:{residentKey:'preferred',userVerification:'required'},excludeCredentials:credentials.map(c=>({id:c.id,transports:c.transports as any}))});
- return {accountID:account.id,requestID:await store.newChallenge(account.id,accountID?'register_backup':'register_initial',options.challenge,token),options};
+ if(!accountID&&credentials.length)throw Error('Existing passkey authentication required');
+ return initialRegistrationOptions(rpID,account,credentials,accountID,token);
 }
 export async function finishRegistration(accountID:string,requestID:string,response:RegistrationResponseJSON,rpID:string,origin:string,token?:string){
  const count=await store.withLockedAccount(accountID,async client=>{

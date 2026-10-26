@@ -10,7 +10,7 @@ import { startPaymentWorker } from './payments/worker.js';
 import { registerPaymentRoutes } from './payments/routes.js';
 import Fastify from 'fastify';
 import {getConfig} from './config.js';
-import {beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
+import {beginEmailOnboarding,beginRegistration,finishRegistration,beginAuthentication,finishAuthentication} from './registration.js';
 import {sessionAccount,hashToken,getCredentials,revokeSession,db,getAccountByEmail,emailForAccount} from './store.js';
 export async function buildApp(options: { config?: ReturnType<typeof getConfig>; payments?: PaymentService; deployments?: AutomaticDeploymentService; indexer?: WalletBackendClient; passkeyCodec?: ContractPasskeyCodec; receiveRoute?: PaymentDependencies['receiveRoute']; logger?: boolean; checkDatabase?: () => Promise<unknown> } = {}) {
 const config=options.config??getConfig(),app=Fastify({logger:options.logger??true,trustProxy:'loopback',bodyLimit:32768,ajv:{customOptions:{removeAdditional:false,coerceTypes:false}}});
@@ -22,6 +22,10 @@ app.addHook('onRequest',async(req,reply)=>{reply.header('Cache-Control','no-stor
 app.get('/health',async()=>({status:'ok',network:'TESTNET',walletDeploymentEnabled:!!options.deployments}));
 app.get('/ready',async(_req,reply)=>{try{await (options.checkDatabase??(()=>db.query('SELECT 1')))();return {status:'ready',network:'TESTNET'};}catch{return reply.code(503).send({status:'unavailable'});}});
 app.get('/api/v1/network',async()=>({network:config.network,rpcUrl:config.rpcUrl,horizonUrl:config.horizonUrl,walletDeploymentEnabled:!!options.deployments}));
+app.post('/api/v1/passkeys/onboarding/options', {schema:{body:{type:'object',required:['email'],additionalProperties:false,properties:{email:{type:'string',minLength:3,maxLength:254}}}}}, async(req,reply)=>{
+ try{return await beginEmailOnboarding(config.rpID,(req.body as {email:string}).email);}
+ catch{return reply.code(400).send({error:'Cannot start passkey sign-in'});}
+});
 app.post('/api/v1/passkeys/registration/options',async(req,reply)=>{try{const id=(req.body as {accountID?:string}|undefined)?.accountID,t=token(req.headers.authorization);if(id&&await sessionAccount(t)!==id)return reply.code(403).send({error:'Authentication required'});return await beginRegistration(config.rpID,id,id?t:undefined,(req.body as {email?:string}|undefined)?.email);}catch{return reply.code(400).send({error:'Cannot start enrollment'});}});
 app.post('/api/v1/passkeys/registration/verify',async(req,reply)=>{
   try {
