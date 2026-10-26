@@ -29,3 +29,19 @@
 .nav-more{padding:8px 10px;color:#b6c5d8}.nav-more summary{cursor:pointer;padding:8px 0;font-weight:600}.nav-more a{margin-top:5px}
 @media(max-width:1000px){.wallet-home{grid-template-columns:1fr}.wallet-hero{grid-column:auto}}
 @media(max-width:600px){.wallet-hero{padding:23px}.wallet-card-heading{align-items:flex-start}.wallet-network{font-size:10px}.wallet-hero-actions a{flex:1}.wallet-activity-item{flex-wrap:wrap}.wallet-receipt{margin-left:50px}}
+
+/* Independent, authenticated wallet profile */
+.profile-page{max-width:920px;margin:auto}
+.profile-page .card{max-width:none}
+.profile-section-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.profile-section-heading h2,.profile-page section h2{display:flex;align-items:center;gap:10px}
+.profile-detail-grid{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr);gap:12px;margin:18px 0}
+.profile-detail-grid dt{color:#53657e;font-weight:650}
+.profile-detail-grid dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.profile-page .wallet-address-row input.mono{flex:1;min-width:200px;font-size:13px}
+.profile-page .wallet-address-row button{display:inline-flex;align-items:center;gap:7px}
+.onboarding-progress{border:1px solid #dae3ee;background:#f5f8fc;border-radius:12px;padding:16px;margin:18px 0}
+.onboarding-progress strong{display:block;margin-bottom:7px}
+.onboarding-progress ol{margin:0;padding-left:22px}
+.onboarding-progress li{margin:7px 0;line-height:1.5}
+@media(max-width:600px){.profile-detail-grid{grid-template-columns:1fr;gap:3px}.profile-detail-grid dd{margin-bottom:12px}.profile-page .wallet-address-row input.mono{min-width:100%}}
