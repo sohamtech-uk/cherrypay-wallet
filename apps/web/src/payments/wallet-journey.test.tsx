@@ -45,7 +45,7 @@ it('completes returning-user sign-in, keeps one session through dashboard/profil
   await user.type(screen.getByLabelText('Email address (Account ID)'),'alice@example.com');
   await user.click(screen.getByRole('button',{name:'Continue with email'}));
   expect(await screen.findByRole('heading',{name:'Wallet dashboard'})).toBeTruthy();
-  await user.click(screen.getByRole('link',{name:'Profile & settings'}));
+  await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
   expect(await screen.findByLabelText('Email address / Account ID')).toHaveProperty('value','alice@example.com');
   expect(screen.queryByLabelText('Payment service connection')).toBeNull();
   expect(screen.getByLabelText('Wallet address')).toBeTruthy();
@@ -53,7 +53,7 @@ it('completes returning-user sign-in, keeps one session through dashboard/profil
   expect(screen.getByLabelText('Wallet address')).toHaveProperty('value',address);
   await user.click(screen.getByRole('link',{name:'Dashboard'}));
   expect(screen.getByRole('heading',{name:'Wallet dashboard'})).toBeTruthy();
-  await user.click(screen.getByRole('link',{name:'Profile & settings'}));
+  await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
   expect(screen.getByLabelText('Email address / Account ID')).toHaveProperty('value','alice@example.com');
   expect(calls.mock.calls.filter(([url])=>url.endsWith('/passkeys/onboarding/options'))).toHaveLength(1);
   await user.click(screen.getByRole('button',{name:'Sign out'}));
@@ -73,7 +73,7 @@ it('registers a new email with a passkey and shows wallet deployment unavailable
   expect(screen.getByText('✓ Email and passkey verified')).toBeTruthy();
   expect(screen.getByText('Wallet deployment unavailable')).toBeTruthy();
   expect(screen.queryByText('Wallet connected.')).toBeNull();
-  await user.click(screen.getByRole('link',{name:'Profile & settings'}));
+  await user.click(screen.getAllByRole('link',{name:'Profile & settings'})[0]);
   expect(screen.getByLabelText('Email address / Account ID')).toHaveProperty('value','alice@example.com');
   expect(screen.queryByLabelText('Wallet address')).toBeNull();
   expect(calls.mock.calls.filter(([url])=>url.endsWith('/passkeys/registration/verify'))).toHaveLength(1);
