@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
   push:
-    branches: [develop]
+    branches: [develop, main]
     paths: ['apps/**', 'infra/azure/**', 'scripts/test-production-containers.sh', '.github/workflows/wallet-azure.yml']
   workflow_dispatch:
 permissions:
@@ -31,7 +31,11 @@ jobs:
       - name: Production container smoke test
         run: bash scripts/test-production-containers.sh
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    # Deploy only from the reviewed main branch: never from PRs or develop pushes.
+    # Both main pushes and manual dispatches from main require successful container checks.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: containers
     runs-on: ubuntu-latest
     timeout-minutes: 30
