@@ -14,7 +14,7 @@ import './payments/payments.css';
 import { useEffect, useState } from 'react';
 import { Overview } from './payments/Overview';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, CircleHelp, Clock3, KeyRound, LayoutDashboard, LockKeyhole, Settings2, ShieldAlert, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, CircleHelp, Clock3, KeyRound, LayoutDashboard, LockKeyhole, Settings2, ShieldAlert } from 'lucide-react';
 
 
 function TestnetTag() { return <span className="testnet" aria-label="Stellar Testnet only">● TESTNET ONLY</span>; }
