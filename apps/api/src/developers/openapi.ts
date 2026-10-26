@@ -57,10 +57,19 @@ const identity = {
 };
 const recipientDirectory = {
   '/api/v1/wallet/email-verification/request': {
-    post: mutation('Email an 8-digit mailbox verification code', 'Requires an authenticated passkey session and Exchange Online mail configuration. Code expires after 15 minutes; mail delivery is not proof of wallet recovery.', body(plain), true)
+    post: mutation('Send mailbox verification code', 'Authenticated owner only. Uses configured Exchange Online; code expires after 15 minutes.', body(plain), true)
   },
   '/api/v1/wallet/email-verification/confirm': {
-    post: mutation('Verify account mailbox ownership', 'A code can be tried at most five times. Only verifies the mailbox, NOT legal identity or wallet recovery.', envelope({code:{type:'string',pattern:'^[0-9]{8}
+    post: mutation('Confirm mailbox ownership', 'The eight digit code is rate limited and has a maximum of five guesses. Email verification is not legal identity verification.', envelope({ code: { type:'string' } }, ['code']), true)
+  },
+  '/api/v1/wallet/email-directory': {
+    post: mutation('Opt in or out of email payments', 'Opt-in requires mailbox verification and confirmed on-chain wallet binding.', envelope({ enabled: { type:'boolean' } }, ['enabled']), true)
+  },
+  '/api/v1/recipients/resolve': {
+    get: read('Resolve an opted-in recipient email', 'Exact-match authenticated Testnet C-address lookup only. Unverified, private and missing accounts are indistinguishable. No legal identity verification.', true, [{ name:'email', in:'query',required:true,schema:{ type:'string',format:'email' } }])
+  }
+};
+const deployment = {
   '/api/v1/smart-account/capabilities': { get: read('Read smart-account capability gates', 'Testnet contract and verifier metadata. Capability flags are not proof that a user can spend or recover.') },
   '/api/v1/smart-account/relayer': { get: read('Read public Testnet relayer information', 'Returns non-secret relayer status and public key when configured.') },
   '/api/v1/smart-account/deployment': {
