@@ -6,6 +6,7 @@ import { getConfig } from './config.js';
 import { PaymentService } from './payments/service.js';
 import { MemoryRepository } from './payments/test-support/memory-repository.js';
 import { intent, mockChain, mockPolicy, wallet } from './payments/test-fixtures.js';
+import type { AutomaticDeploymentService } from './smart-account/automatic-deployment.js';
 const config = getConfig({ WALLET_ORIGIN: 'https://wallet.example' });
 const path = '/api/v1/wallets/wallet-1/attempts';
 const headers = { origin: config.origin, authorization: 'Bearer verified-session', 'idempotency-key': 'idempotency-key-0001' };
@@ -17,6 +18,23 @@ function payments() {
   return service;
 }
 describe('application payment composition', () => {
+  it.each([[false, false], [true, false], [false, true], [true, true]])('reports deployment=%s and payment runtime=%s consistently without claiming recovery', async (deploymentEnabled, paymentEnabled) => {
+    const deployments = deploymentEnabled ? { start: () => async () => {} } as AutomaticDeploymentService : undefined;
+    const app = await buildApp({ config, deployments, payments: paymentEnabled ? payments() : undefined, logger: false });
+    try {
+      const health = (await app.inject('/health')).json();
+      const response = await app.inject('/api/v1/smart-account/capabilities');
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toMatchObject({
+        capabilityScope: 'runtime', walletVerificationRequired: true,
+        deploymentEnabled: health.walletDeploymentEnabled,
+        spendingEnabled: health.walletPaymentsEnabled, recoveryEnabled: false,
+      });
+      expect(response.json().spendingEnabled).toBe(paymentEnabled);
+      expect(identity.sessionAccount).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
   it('publishes a safe, anonymous, current OpenAPI contract covering identity, wallet, invoice and payment APIs', async () => {
     const app = await buildApp({ config, logger: false });
     try {
