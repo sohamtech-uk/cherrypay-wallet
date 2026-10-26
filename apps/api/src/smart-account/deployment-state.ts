@@ -23,7 +23,9 @@ export class DeploymentStateStore {
         ORDER BY created_at,account_id FOR UPDATE SKIP LOCKED LIMIT 1`);
       const job=rows[0];
       if(!job){await client.query('COMMIT');return null;}
-      // Never claim a retry whose prior transaction may already exist on-chain.\n      if(job.transaction_hash){await client.query('ROLLBACK');throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');}\n      const token=randomUUID();
+      // Never claim a retry whose prior transaction may already exist on-chain.
+      if(job.transaction_hash){await client.query('ROLLBACK');throw Error('RECONCILIATION_REQUIRED_BEFORE_RETRY');}
+      const token=randomUUID();
       await client.query(`UPDATE wallet_deployment_jobs SET status='DEPLOYING',lease_token=$2,
         lease_until=NOW()+INTERVAL '2 minutes',attempt_count=attempt_count+1,updated_at=NOW(),last_transition_at=NOW()
         WHERE account_id=$1`,[job.account_id,token]);
