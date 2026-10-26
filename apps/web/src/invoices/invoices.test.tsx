@@ -35,7 +35,7 @@ describe('invoice checkout',()=>{
     expect(document.activeElement).toBe(screen.getByRole('button',{name:'Preview payment'}));
     await user.keyboard('{Enter}');
     await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('heading',{name:'Review and approve'})));
-    expect(screen.getByText('0.0000100 XLM · paid by sponsor')).toBeTruthy();
+    expect(screen.getByText('0.0000100 XLM · sponsor pays, up to this limit')).toBeTruthy();
     expect(screen.getByRole('button',{name:'Approve exact payment'})).toHaveProperty('disabled',true);
     expect(service.approve).not.toHaveBeenCalled();
     await user.tab();expect(document.activeElement).toBe(screen.getByRole('checkbox'));
