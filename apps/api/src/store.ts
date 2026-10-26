@@ -2,6 +2,7 @@ import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {Pool,type PoolClient} from 'pg';
 import {runMigrations} from './migrations.js';
 import {databaseConfig} from './database-config.js';
+import {isIP} from 'node:net';
 
 const pool = new Pool(databaseConfig());
 // Idle connection failures must not crash the listener or disclose credentials.
@@ -41,7 +42,7 @@ export async function getAccountByEmail(value: string) {
 export async function createEmailVerification(accountID: string) {
   const code = String(randomBytes(4).readUInt32BE(0) % 100000000).padStart(8, '0');
   await pool.query(
-    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at",
+    "INSERT INTO wallet_email_verifications(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '15 minutes') ON CONFLICT(account_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at,attempts=0",
     [accountID,hashToken(code)]);
   return code;
 }
@@ -76,9 +77,15 @@ export async function sessionAccount(token:string|undefined):Promise<string|null
   const {rows} = await pool.query<{account_id:string}>('SELECT account_id FROM wallet_sessions WHERE token_hash=$1 AND expires_at>NOW()',[hashToken(token)]);
   return rows[0]?.account_id ?? null;
 }
-export async function createSession(accountID:string) {
+export type AccessMetadata = {ip?:string;userAgent?:string};
+export async function createSession(accountID:string, metadata:AccessMetadata={}) {
   const token = freshToken();
-  await pool.query("INSERT INTO wallet_sessions(token_hash,account_id,expires_at) VALUES($1,$2,NOW()+INTERVAL '30 minutes')",[hashToken(token),accountID]);
+  // One statement commits the session and audit event together; raw tokens never enter the audit table.
+  await pool.query(`WITH session AS (
+    INSERT INTO wallet_sessions(token_hash,account_id,expires_at) VALUES($1,$2,NOW()+INTERVAL '30 minutes') RETURNING *
+  ) INSERT INTO wallet_access_events(id,account_id,session_hash,expires_at,ip_address,user_agent)
+    SELECT $3,account_id,token_hash,expires_at,$4,$5 FROM session`,
+    [hashToken(token),accountID,randomUUID(),metadata.ip&&isIP(metadata.ip)?metadata.ip:null,(metadata.userAgent??'').replace(/[\x00-\x1f\x7f]/g,'').slice(0,512)]);
   return {token,expiresInSeconds:1800};
 }
 export async function revokeSession(token:string) {

@@ -1,6 +1,8 @@
 import { Payroll } from './payments/Payroll';
 import { WalletShell } from './WalletShell';
 import { ApiReference } from './developers/ApiReference';
+import { Upgrade } from './Upgrade';
+import { AccessHistory } from './payments/AccessHistory';
 import { Business } from './invoices/Business';
 import { useWalletAccount } from './payments/account-context';
 import { usePayments } from './payments/context';
@@ -26,7 +28,7 @@ import { CircleHelp, KeyRound, LockKeyhole } from 'lucide-react';
 
 function RouteContent({children, external}: {children: React.ReactNode; external: boolean}) {
   const account = useWalletAccount(), adapter = usePayments(), {pathname} = useLocation();
-  if (account && !adapter && !external && !pathname.startsWith('/pay/') && !['/profile','/security','/developers','/api-docs'].includes(pathname) && (!account.authenticated || pathname !== '/receive')) return null;
+  if (account && !adapter && !external && !pathname.startsWith('/pay/') && !['/profile','/security','/developers','/api-docs','/upgrade','/access-history'].includes(pathname) && (!account.authenticated || pathname !== '/receive')) return null;
   return children;
 }
 function SetupCard() { return <section className="card payment-screen"><h1>Ready for your first payment?</h1><p>Receive XLM using your wallet address, or review and approve a payment with your passkey.</p><div className="actions"><Link className="primary-link" to="/">Open dashboard</Link><Link className="secondary-button" to="/receive">Receive XLM</Link></div></section>; }
@@ -47,6 +49,8 @@ export default function App({ paymentAdapter, signer }: { paymentAdapter?: Payme
     <Route path="/recipient-intelligence" element={<RecipientIntelligence/>}/>
     <Route path="/" element={<Overview/>}/>
     <Route path="/profile" element={<Profile/>}/>
+    <Route path="/upgrade" element={<Upgrade/>}/>
+    <Route path="/access-history" element={<AccessHistory/>}/>
     <Route path="/onboarding" element={<SetupCard/>}/>
     <Route path="/security" element={<Security/>}/>
     <Route path="/developers" element={<ApiReference/>}/>
@@ -65,7 +69,7 @@ export default function App({ paymentAdapter, signer }: { paymentAdapter?: Payme
     <WalletShell externalNetwork={externalNetwork}>
       {paymentAdapter === undefined
         ? <PaymentConnection onConnect={setConnectedAdapter} signer={signer} showAccountActions={false}
-            showSetup={!external && !['/profile','/security','/developers','/api-docs'].includes(pathname) && (!connectedAdapter || pathname === '/onboarding')}><RouteContent external={external}>{screens}</RouteContent></PaymentConnection>
+            showSetup={!external && !['/profile','/security','/developers','/api-docs','/upgrade','/access-history'].includes(pathname) && (!connectedAdapter || pathname === '/onboarding')}><RouteContent external={external}>{screens}</RouteContent></PaymentConnection>
         : screens}
     </WalletShell>
   </PaymentContext.Provider>;

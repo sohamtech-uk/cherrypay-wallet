@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
 import { PostgresApprovalTickets, postgresAssertionVerifier } from './payments/passkey-approval.js';
-import { hashToken } from './store.js';
+import { hashToken, createEmailVerification, verifyEmail } from './store.js';
 import { buildApp } from './app.js';
 import { getConfig } from './config.js';
 import { PaymentService } from './payments/service.js';
@@ -18,6 +18,18 @@ import { StrKey } from '@stellar/stellar-sdk';
 
 const integration = process.env.RUN_DB_INTEGRATION==='1' ? describe : describe.skip;
 integration('PostgreSQL wallet integration and transaction invariants', () => {
+  it('limits each verification code to five guesses and permits a fresh code after exhaustion',async()=>{
+    const owner=await createAccount(`${randomUUID()}@example.com`);
+    const first=await createEmailVerification(owner.id);
+    const wrong=first==='00000000'?'99999999':'00000000';
+    for(let i=0;i<5;i++)expect(await verifyEmail(owner.id,wrong)).toBe(false);
+    expect(await verifyEmail(owner.id,first)).toBe(false);
+    const next=await createEmailVerification(owner.id);
+    expect((await db.query('SELECT attempts FROM wallet_email_verifications WHERE account_id=$1',[owner.id])).rows[0].attempts).toBe(0);
+    expect(await verifyEmail(owner.id,next)).toBe(true);
+    expect(await verifyEmail(owner.id,next)).toBe(false);
+    await db.query('DELETE FROM wallet_accounts WHERE id=$1',[owner.id]);
+  });
   const repository = new PostgresPaymentRepository(db);
   let account: {id:string};
   let wallet: Wallet;
@@ -31,7 +43,7 @@ integration('PostgreSQL wallet integration and transaction invariants', () => {
   },30_000);
   it('applies identity and payment migrations only once',async () => {
     const {rows}=await db.query('SELECT name FROM wallet_schema_migrations ORDER BY name');
-    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_email_identity.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql','014_cancelled_preparations.sql', '015_invoice_requests.sql','016_verified_email_directory.sql']);
+    expect(rows.map(r=>r.name)).toEqual(['001_wallet_identity.sql','002_wallet_payments.sql','003_transfer_approvals.sql','004_email_identity.sql','004_payroll_runs.sql','009_wallet_deployment_jobs.sql','010_automatic_contract_deployment.sql','011_contract_wallet_funding.sql', '012_friendbot_contract_funding.sql', '013_payment_monitor_start.sql','014_cancelled_preparations.sql', '015_invoice_requests.sql','016_access_history.sql','016_verified_email_directory.sql']);
   });
   it('persists and revokes hashed sessions',async () => {
     const {token}=await createSession(account.id);

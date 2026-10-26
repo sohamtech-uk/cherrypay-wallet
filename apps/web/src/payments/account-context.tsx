@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { OwnedWallet } from './api';
 import type { DeploymentView } from './deployment';
+import type { AccessPage } from './access-api';
 
 /** Session state is held in memory by PaymentConnection; no access tokens enter React context. */
 export interface WalletAccount {
@@ -24,6 +25,9 @@ export interface WalletAccount {
   refreshDeployment(): Promise<void>;
   fundTestnet(): Promise<void>;
   signOut(): Promise<void>;
+  listAccess?(): Promise<AccessPage>;
+  revokeAccess?(id:string): Promise<void>;
+  shareLocation?(latitude:number,longitude:number): Promise<void>;
 }
 export const WalletAccountContext = createContext<WalletAccount | null>(null);
 export const useWalletAccount = () => useContext(WalletAccountContext);

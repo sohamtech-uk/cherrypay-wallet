@@ -84,6 +84,7 @@ const deployment = {
   }
 };
 const integrations = {
+  '/api/v1/market/xlm': {get:read('Read informational XLM/USD market history','Optional CoinGecko reference with five-minute caching. Returns 503 when unavailable or stale. Testnet balances have no fiat value; market data is never spending authority.',false,[{name:'days',in:'query',schema:{type:'string',enum:['1','7','30','90','365'],default:'1'}}])},
   '/api/v1/aurora/capabilities': { get: read('Check optional Aurora route availability', 'Aurora Base USDC to Stellar USDC is MAINNET-only when configured; it never funds the Stellar Testnet wallet.') },
   '/api/v1/aurora/quotes': {
     post: mutation('Request conditional Aurora MAINNET quote', 'Available only when a separate MAINNET integration is deliberately enabled. Requires real Base funds and is NOT a Testnet XLM wallet API.', envelope({ recipient: text, refundTo: text, amount: text }, ['recipient','refundTo','amount']))
@@ -96,11 +97,23 @@ const integrations = {
       [query('address','Stellar G-address or C-address'), { name: 'network', in: 'query', required: true, schema: { type: 'string', enum: ['TESTNET','MAINNET'] } }])
   }
 };
+const access = {
+  '/api/v1/session/access-history': {get:read('Read recent successful sign-ins','Owner-only latest 100 entries within 30 days. Returns timestamps, reported device, observed IP, active/current flags and optional coarse browser-reported location. No token hashes are returned. Recording begins with this release.',true)},
+  '/api/v1/session/access-history/{id}/revoke': {post:{
+    ...mutation('Revoke an owned session','Deletes only the owned session selected by its access-event ID; retains the audit record until retention expiry.',body(plain),true),
+    parameters:[{name:'id',in:'path',required:true,schema:{type:'string',format:'uuid'}}],
+    responses:{'204':{description:'Session authority revoked'},'400':errorResponse,'401':errorResponse,'403':errorResponse,'404':errorResponse,'503':errorResponse}
+  }},
+  '/api/v1/session/location': {post:{
+    ...mutation('Save optional approximate location','Only the current session is updated. Browser permission and explicit user action are required by the UI; coordinates are rounded to one decimal place. Self-reported information, never authentication evidence.',envelope({latitude:{type:'number',minimum:-90,maximum:90},longitude:{type:'number',minimum:-180,maximum:180}},['latitude','longitude']),true),
+    responses:{'204':{description:'Coarse location saved'},'400':errorResponse,'401':errorResponse,'403':errorResponse,'404':errorResponse,'503':errorResponse}
+  }}
+};
 export const walletOpenApi = {
   ...paymentOpenApi,
   info: { ...paymentOpenApi.info,
     title: 'Cherry Pay Wallet API — Developer Reference',
     description: 'Same-origin API reference for Stellar Testnet smart-wallet accounts, WebAuthn, native XLM payments, invoice checkout, payroll and optional integrations. Available endpoints do not imply feature activation. API responses require verification before marking transactions settled; no real GBP or mainnet XLM transfer support is implied.' },
   servers: [{ url: '/', description: 'Same origin as Cherry Wallet; use /api/v1 for application endpoints.' }],
-  paths: { ...paymentOpenApi.paths, ...identity, ...recipientDirectory, ...deployment, ...integrations }
+  paths: { ...paymentOpenApi.paths, ...identity, ...recipientDirectory, ...deployment, ...integrations, ...access }
 };

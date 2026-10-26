@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { readAccess } from './access-api';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { ApiError, apiClient, connectPaymentAdapter, discoverWallets, object, text, type OwnedWallet, type TransferSigner } from './api';
 import { parseDeployment, type DeploymentView } from './deployment';
@@ -24,6 +25,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [walletId, setWalletId] = useState('');
   const [wallets, setWallets] = useState<OwnedWallet[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
+  const [sessionVersion,setSessionVersion]=useState(0);
   const [credentialCount, setCredentialCount] = useState(0);
   const [emailVerified, setEmailVerified] = useState(false);
   const [emailPaymentsEnabled, setEmailPaymentsEnabledState] = useState(false);
@@ -34,6 +36,16 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   const [notice, setNotice] = useState('');
   const [deploymentStatus, setDeploymentStatus] = useState('');
   const [deployment, setDeployment] = useState<DeploymentView | null>(null);
+  const access = useMemo(() => {
+    const session=token.current,id=generation.current;
+    const api=apiClient(()=>session);
+    const check=()=>{if(!sessionVersion||!authenticated||!accountId||!session||generation.current!==id||token.current!==session||Date.now()>=deadline.current)throw Error('Session expired');};
+    return {
+      listAccess:async()=>{check();const page=await readAccess(api);check();return page;},
+      revokeAccess:async(eventId:string)=>{check();await api(`session/access-history/${encodeURIComponent(eventId)}/revoke`,{});check();},
+      shareLocation:async(latitude:number,longitude:number)=>{check();await api('session/location',{latitude,longitude});check();},
+    };
+  },[authenticated,accountId,sessionVersion]);
   useEffect(() => () => {
     generation.current++; clearTimeout(expiry.current); clearTimeout(poll.current);
     const abandoned = token.current; token.current = undefined;
@@ -108,7 +120,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     clearTimeout(expiry.current); clearTimeout(poll.current); setDeploymentStatus(''); setDeployment(null);
     token.current = verifiedToken; deadline.current = Date.now() + Number(session.expiresInSeconds) * 1000;
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
-    setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
+    setAuthenticated(true); setSessionVersion(v=>v+1); setCredentialCount(Number(session.credentialCount));
     // Profile state is read with the private bearer token, never placed in the public adapter.
     void refreshEmailSettings(id,owner).catch(() => { if (active(id)) { setEmailVerified(false); setEmailPaymentsEnabledState(false); } });
     if (previous && previous !== verifiedToken) {
@@ -266,7 +278,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
   }
   return <WalletAccountContext.Provider value={{ accountId, authenticated, connected, credentialCount, canSign, busy, error, notice, deployment, deploymentStatus, wallets,
     emailVerified, emailPaymentsEnabled, requestEmailVerification, confirmEmailVerification, setEmailPaymentsEnabled,
-    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect }}>
+    addPasskey: () => register(true), refreshDeployment, fundTestnet, signOut: disconnect, ...access }}>
     {showSetup && <section className="card payment-screen wallet-connect" aria-label="Payment service connection" aria-busy={busy}>
     <h1>{authenticated ? 'Account & wallet setup' : 'Welcome to Cherry Wallet'}</h1>
     <p>{authenticated ? 'Finish setting up your wallet to start making payments.' : 'One email. One passkey. Your own wallet for sending and receiving XLM.'}</p>
