@@ -1,4 +1,6 @@
 import { Payroll } from './payments/Payroll';
+import { SiteHeader } from './site/SiteHeader';
+import { SiteFooter } from './site/SiteFooter';
 import { AuroraPayment } from './integrations/AuroraPayment';
 import { RecipientIntelligence } from './integrations/RecipientIntelligence';
 import { PaymentConnection } from './payments/Connection';
@@ -25,7 +27,9 @@ function Shell({ children, externalNetwork }: { children: React.ReactNode; exter
   const mainnet = pathname === '/pay-from-another-chain' && externalNetwork === 'MAINNET';
   const intelligence = pathname === '/recipient-intelligence';
   const tag = mainnet ? <span className="mainnet-tag">MAINNET · REAL USDC</span> : intelligence ? <span className="read-only-tag">READ ONLY</span> : <TestnetTag/>;
-  return <div className="app"><a className="skip-link" href="#wallet-content">Skip to content</a>
+  return <div className="wallet-site"><a className="skip-link" href="#wallet-content">Skip to content</a>
+    <SiteHeader/>
+    <div className="app">
     <aside className="sidebar">
       <Link to="/" className="brand"><span className="brand-icon">✦</span><span>Cherry<span className="brand-accent">Wallet</span></span></Link>
       {tag}
@@ -48,6 +52,8 @@ function Shell({ children, externalNetwork }: { children: React.ReactNode; exter
       <header className="topbar"><span>Cherry Pay · Wallet</span>{tag}</header>
       <div className="content">{children}</div>
     </main>
+    </div>
+    <SiteFooter/>
   </div>;
 }
 function SetupCard() { return <section className="card payment-screen"><span className="eyebrow">START HERE</span><h1>Set up your Testnet wallet</h1><div className="steps"><div><span>01</span><strong>Sign in with your email and passkey</strong><small>Your device creates a sign-in passkey the first time. Wallet spending additionally requires its verified on-chain signer binding.</small></div><div><span>02</span><strong>Create and fund your C-wallet</strong><small>If automatic deployment is enabled, the service deploys your smart wallet and verifies its signer. Wait for confirmation before funding. Funding requires operator configuration.</small></div><div><span>03</span><strong>Send and receive Testnet XLM</strong><small>Share your C-address to receive supported transfers. Review the recipient and amount, then approve each send with your primary passkey.</small></div></div><p>Wallet readiness depends on successful deployment and payment-service activation. Sending requires sufficient balance. Testnet XLM has no real-world value.</p><Link className="secondary-button" to="/receive">Receive XLM</Link> <Link className="secondary-button" to="/send">Send XLM</Link><p className="notice"><LockKeyhole size={16}/> Your device manages passkeys. Never share private keys or seed phrases.</p></section>; }
