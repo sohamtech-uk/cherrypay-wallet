@@ -31,7 +31,7 @@ jobs:
       - name: Production container smoke test
         run: bash scripts/test-production-containers.sh
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[wallet-deploy]'))) && github.ref == 'refs/heads/develop'
     needs: containers
     runs-on: ubuntu-latest
     timeout-minutes: 30
