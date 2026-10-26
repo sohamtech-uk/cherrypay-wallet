@@ -110,7 +110,7 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
     expiry.current = setTimeout(() => clearSession('Your session expired. Reconnect with your passkey.'), Number(session.expiresInSeconds) * 1000);
     setAuthenticated(true); setCredentialCount(Number(session.credentialCount));
     // Profile state is read with the private bearer token, never placed in the public adapter.
-    void refreshEmailSettings(id).catch(() => { if (active(id)) { setEmailVerified(false); setEmailPaymentsEnabledState(false); } });
+    void refreshEmailSettings(id,owner).catch(() => { if (active(id)) { setEmailVerified(false); setEmailPaymentsEnabledState(false); } });
     if (previous && previous !== verifiedToken) {
       try { await revoke(previous); }
       catch { if (active(id)) setError('Your new session is active. Previous session logout could not be confirmed; it will expire.'); }
@@ -209,10 +209,10 @@ export function PaymentConnection({ onConnect, signer, showSetup = true, showAcc
       }
     } finally {if(generation.current===id){lock.current=false;setBusy(false);}}
   }
-  async function refreshEmailSettings(id = generation.current) {
+  async function refreshEmailSettings(id: number, expectedAccount: string) {
     const identity = object(await apiClient(() => token.current)('wallet/me'));
     if (!active(id)) return;
-    if (identity.accountID !== accountId || typeof identity.emailVerified !== 'boolean' || typeof identity.emailPaymentsEnabled !== 'boolean')
+    if (identity.accountID !== expectedAccount || typeof identity.emailVerified !== 'boolean' || typeof identity.emailPaymentsEnabled !== 'boolean')
       throw Error('The account profile differs from this session.');
     setEmailVerified(identity.emailVerified);
     setEmailPaymentsEnabledState(identity.emailPaymentsEnabled);
