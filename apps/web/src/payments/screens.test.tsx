@@ -13,6 +13,10 @@ const address = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 1));
 const attempt: Attempt = { id: 'attempt-1', network: NETWORK, from: address, destination: address, amountStroops: '10000001', feeStroops: '100', createdAt: '2026-10-25T12:00:00Z', status: 'pending', verified: false };
 function service(): PaymentAdapter { return { network: NETWORK, address, supportedDestinations: ['classic'], receive: { address, route: 'classic', instructions: 'Send Testnet XLM only.' }, prepare: vi.fn(async intent => ({ ...intent, id: 'q', feeStroops: '100', feePayer: 'wallet', spendableStroops: '100000000', expiresAt: new Date(Date.now() + 60000).toISOString() })), createAttempt: vi.fn(async () => ({ ...attempt, status: 'awaiting_approval' as const })), approve: vi.fn(async () => attempt), getAttempt: vi.fn(async () => attempt), getAttemptByKey: vi.fn(async () => attempt), listAttempts: vi.fn(async () => ({ items: [] })) }; }
 function mount(element: React.ReactNode, adapter: PaymentAdapter | null) { return render(<MemoryRouter><PaymentContext.Provider value={adapter}>{element}</PaymentContext.Provider></MemoryRouter>); }
+async function chooseMethod(user: ReturnType<typeof userEvent.setup>, method = 'address') {
+  await user.click(screen.getByRole('button', { name: `Pay by ${method}` }));
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+}
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 describe('wallet screens', () => {
@@ -21,9 +25,10 @@ describe('wallet screens', () => {
   it('reviews exact amounts and recovers a submission timeout without resending', async () => {
     const adapter = service(); vi.mocked(adapter.approve).mockRejectedValue(new Error('Connection lost. Check existing attempt.'));
     const user = userEvent.setup(); const view = mount(<Send/>, adapter);
-    await user.type(screen.getByLabelText('Recipient address'), address);
+    await chooseMethod(user);
+  await user.type(screen.getByLabelText('Recipient address'), address);
     await user.type(screen.getByLabelText('Exact amount (XLM)'), '1.0000001');
-    await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+    await user.click(screen.getByRole('button', { name: 'Review payment' }));
     expect(await screen.findByText('1.0000101 XLM')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Approve exact payment' })).toHaveProperty('disabled', true);
     await user.click(screen.getByRole('checkbox'));
@@ -31,7 +36,7 @@ describe('wallet screens', () => {
     await screen.findByText('Connection lost. Check existing attempt.');
     expect(adapter.createAttempt).toHaveBeenCalledTimes(1); expect(adapter.approve).toHaveBeenCalledTimes(1);
     view.unmount(); mount(<Send/>, adapter);
-    expect(screen.queryByRole('button', { name: 'Preview payment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review payment' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Check existing attempt' }));
     await screen.findByText('Pending confirmation');
     expect(adapter.approve).toHaveBeenCalledTimes(1);
@@ -44,9 +49,10 @@ it('rejects an expired quote before creating an attempt', async () => {
   const adapter = service(); const user = userEvent.setup();
   vi.mocked(adapter.prepare).mockImplementation(async intent => ({ ...intent, id: 'expired', feeStroops: '100', feePayer: 'wallet', spendableStroops: '100000000', expiresAt: '2020-01-01T00:00:00Z' }));
   mount(<Send/>, adapter);
+  await chooseMethod(user);
   await user.type(screen.getByLabelText('Recipient address'), address);
   await user.type(screen.getByLabelText('Exact amount (XLM)'), '1');
-  await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+  await user.click(screen.getByRole('button', { name: 'Review payment' }));
   await screen.findByText('Fee preview expired. Request a new preview.');
   expect(adapter.createAttempt).not.toHaveBeenCalled();
 });
@@ -59,9 +65,13 @@ it('offers manual copy recovery when clipboard permission is denied', async () =
 });
 it('can reach payment fields with the keyboard', async () => {
   const user = userEvent.setup(); mount(<Send/>, service());
-  await user.tab(); expect(document.activeElement).toBe(screen.getByLabelText('Recipient address'));
+  await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Pay by address' }));
+  await user.keyboard(' ');
+  await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }));
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByLabelText('Recipient address'));
   await user.tab(); expect(document.activeElement).toBe(screen.getByLabelText('Exact amount (XLM)'));
-  await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Preview payment' }));
+  await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Review payment' }));
 });
 
 it('saves the recovery key before a persistent preview and recovers its timeout without a replacement', async () => {
@@ -71,11 +81,12 @@ it('saves the recovery key before a persistent preview and recovers its timeout 
     throw Error('Preparation timed out. Check existing attempt.');
   });
   const user = userEvent.setup(); mount(<Send/>, adapter);
+  await chooseMethod(user);
   await user.type(screen.getByLabelText('Recipient address'), address);
   await user.type(screen.getByLabelText('Exact amount (XLM)'), '1');
-  await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+  await user.click(screen.getByRole('button', { name: 'Review payment' }));
   await screen.findByText('Preparation timed out. Check existing attempt.');
-  expect(screen.queryByRole('button', { name: 'Preview payment' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Review payment' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Check existing attempt' }));
   expect(adapter.prepare).toHaveBeenCalledTimes(1); expect(adapter.createAttempt).not.toHaveBeenCalled(); expect(adapter.approve).not.toHaveBeenCalled();
 });
@@ -87,12 +98,13 @@ it('cancels the persisted preview before editing and only then clears the recove
   const adapter = service(); adapter.persistentPreview = true;
   adapter.cancelAttempt = vi.fn(async () => ({ ...attempt, id: 'q', status: 'rejected' as const }));
   const user = userEvent.setup(); mount(<Send/>, adapter);
+  await chooseMethod(user);
   await user.type(screen.getByLabelText('Recipient address'), address); await user.type(screen.getByLabelText('Exact amount (XLM)'), '1.0000001');
-  await user.click(screen.getByRole('button', { name: 'Preview payment' }));
+  await user.click(screen.getByRole('button', { name: 'Review payment' }));
   await screen.findByRole('button', { name: 'Edit payment' });
   expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Edit payment' }));
-  await screen.findByRole('button', { name: 'Preview payment' });
+  await screen.findByRole('button', { name: 'Review payment' });
   expect(adapter.cancelAttempt).toHaveBeenCalledWith('q'); expect(localStorage.getItem(`cherrypay:pending:TESTNET:${address}`)).toBeNull();
   expect(document.activeElement).toBe(screen.getByLabelText('Recipient address'));
 });
@@ -101,7 +113,9 @@ it('resets a missing or unsigned payment only after server confirmation and enab
  const adapter=service(),key='safe-reset-saved-key',storageKey=`cherrypay:pending:TESTNET:${address}`;
  adapter.resetAttempt=vi.fn(async()=>{});localStorage.setItem(storageKey,key);mount(<Send/>,adapter);
  await userEvent.click(screen.getByRole('button',{name:'Reset and change recipient'}));
- await screen.findByLabelText('Recipient address');expect(localStorage.getItem(storageKey)).toBeNull();expect(adapter.resetAttempt).toHaveBeenCalledWith(key);
+ await screen.findByRole('heading',{name:'How do you want to pay?'});
+ await chooseMethod(userEvent.setup());
+ expect(localStorage.getItem(storageKey)).toBeNull();expect(adapter.resetAttempt).toHaveBeenCalledWith(key);
  expect(screen.getByLabelText('Recipient address')).toHaveProperty('value','');expect(adapter.createAttempt).not.toHaveBeenCalled();expect(adapter.approve).not.toHaveBeenCalled();
 });
 it('keeps the recovery key if a submitted payment or unavailable server prevents reset',async()=>{
@@ -160,10 +174,10 @@ it('resolves an opted-in email before preparing, shows exact fees, and requires 
   }));
   mount(<Send/>,adapter);
   const user=userEvent.setup();
-  await user.click(screen.getByLabelText('Verified email'));
+  await chooseMethod(user, 'email');
   await user.type(screen.getByLabelText('Recipient email'),'receiver@example.com');
   await user.type(screen.getByLabelText('Exact amount (XLM)'),'2');
-  await user.click(screen.getByRole('button',{name:'Preview payment'}));
+  await user.click(screen.getByRole('button',{name:'Review payment'}));
   expect(adapter.resolveRecipientEmail).toHaveBeenCalledWith('receiver@example.com');
   expect(adapter.prepare).toHaveBeenCalledWith(expect.objectContaining({destination:verifiedAddress,amountStroops:'20000000'}),undefined);
   expect(screen.getByText(/receiver@example.com · mailbox verified/)).toBeTruthy();
@@ -179,4 +193,44 @@ it('resolves an opted-in email before preparing, shows exact fees, and requires 
   expect(await screen.findByText(/Recipient wallet changed/)).toBeTruthy();
   expect(adapter.createAttempt).not.toHaveBeenCalled();
   expect(adapter.approve).not.toHaveBeenCalled();
+});
+
+
+it('requires a method before recipient details and makes no payment calls on Next or back', async () => {
+  const adapter = service(), user = userEvent.setup();
+  mount(<Send/>, adapter);
+  expect(screen.queryByLabelText('Recipient address')).toBeNull();
+  expect(screen.queryByLabelText('Exact amount (XLM)')).toBeNull();
+  expect(screen.getByRole('button', {name:'Next'})).toHaveProperty('disabled', true);
+  expect(screen.getByRole('button', {name:'Pay by email'})).toHaveProperty('disabled', true);
+  await chooseMethod(user);
+  await user.type(screen.getByLabelText('Recipient address'), address);
+  await user.type(screen.getByLabelText('Exact amount (XLM)'), '1.0000001');
+  await user.click(screen.getByRole('button', {name:'Change payment method'}));
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name:'How do you want to pay?'}));
+  expect(screen.getByRole('button', {name:'Pay by address'}).getAttribute('aria-pressed')).toBe('true');
+  await user.click(screen.getByRole('button', {name:'Next'}));
+  expect(screen.getByLabelText('Recipient address')).toHaveProperty('value', address);
+  expect(screen.getByLabelText('Exact amount (XLM)')).toHaveProperty('value', '1.0000001');
+  expect(adapter.prepare).not.toHaveBeenCalled();
+  expect(adapter.createAttempt).not.toHaveBeenCalled();
+  expect(adapter.approve).not.toHaveBeenCalled();
+});
+
+it('clears the previous recipient when changing payment method while preserving the exact amount', async () => {
+  const adapter = service(), user = userEvent.setup();
+  adapter.resolveRecipientEmail = vi.fn();
+  mount(<Send/>, adapter);
+  await chooseMethod(user);
+  await user.type(screen.getByLabelText('Recipient address'), address);
+  await user.type(screen.getByLabelText('Exact amount (XLM)'), '1.0000001');
+  await user.click(screen.getByRole('button', {name:'Change payment method'}));
+  await chooseMethod(user, 'email');
+  expect(document.activeElement).toBe(screen.getByLabelText('Recipient email'));
+  expect(screen.getByLabelText('Exact amount (XLM)')).toHaveProperty('value', '1.0000001');
+  expect(screen.getByLabelText('Recipient email')).toHaveProperty('value', '');
+  expect(adapter.resolveRecipientEmail).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', {name:'Change payment method'}));
+  await chooseMethod(user);
+  expect(screen.getByLabelText('Recipient address')).toHaveProperty('value', '');
 });

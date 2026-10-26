@@ -31,3 +31,12 @@ Both optional variables must be forwarded into the API container by the deployme
 Deploy the additive migration before serving the new API. Existing payment, funding and signer policies remain unchanged. A rollback can restore the previous web/API image while retaining the additive table; do not drop audit data as part of an application rollback. Update the service privacy notice to describe access history and optional location retention before release.
 
 Validation includes the normal web build/lint/tests, API typecheck/tests, and PostgreSQL migration/ownership/revocation checks in CI. Browser previews use explicitly labeled sample data; they are not live Testnet settlement evidence.
+
+
+### Payment method and email verification feedback
+
+A new Send payment starts with **Pay by address** and **Pay by email** cards. Select a method, choose **Next**, enter the recipient and exact XLM amount, then **Review payment**. Selecting a card or choosing Next does not call the payment API. Email lookup runs only on review and again before approval. The review still shows the actual Stellar destination, exact amount and fee allowance before the explicit passkey approval. Invoice and prefilled-address links open their existing recipient details directly; unresolved saved attempts continue to block replacement payments.
+
+Email verification results appear inside Profile’s **Receive by verified email** section and receive keyboard focus. Provider acceptance is distinct from inbox delivery. A failed provider call returns `EMAIL_DELIVERY_UNAVAILABLE` (503), with only allowlisted configuration/token/send failure categories logged. The UI does not mark the mailbox verified or enable discovery until code verification succeeds and the user opts in.
+
+Live email delivery still requires the configured `AZURE_MAIL_TENANT_ID`, `AZURE_MAIL_CLIENT_ID`, `AZURE_MAIL_CLIENT_SECRET` and `AZURE_MAIL_SENDER` (or the documented sender fallback), a sender mailbox, and the appropriate existing Graph mail authorization. Inspect configuration presence and redacted provider failure categories before changing credentials. Never log verification codes or tokens. A successful mocked send test does not prove mailbox delivery.
