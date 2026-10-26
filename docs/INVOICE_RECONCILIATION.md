@@ -12,7 +12,7 @@ pins the native XLM SAC. Each `(walletId, invoiceReference)` is immutable and
 unique; repeat the same payload to recover a lost response. A business using
 multiple invoice namespaces must prefix its reference with its organisation ID.
 
-The generated QR contains `https://<wallet-origin>/pay/<random-request-uuid>`.
+The generated QR contains `https://<wallet-origin>/pay/<random-request-uuid>`. Every invoice reference within its merchant wallet has a distinct immutable UUID and thus a unique QR. Retrying creation with the exact same reference/payload intentionally returns the **same** QR, not a second payment request. The QR is hidden from merchant sharing once the invoice is paid, expired or has an unresolved payment. Its original URL remains a read-only status link after settlement.
 The page retrieves authoritative terms from the server, retains the invoice
 through email/passkey sign-in, and uses the ordinary exact-payment review and
 fresh passkey authorization. This is a Cherry Pay checkout link, not a generic
@@ -23,7 +23,7 @@ amount, aggregate paid amount and expiry; do not put customer PII in references.
 
 The immutable attempt intent adds `paymentRequestId`. Its digest includes that
 ID; existing non-invoice digests are unchanged. PostgreSQL validates the request,
-recipient, network, native asset, remaining amount and expiry under a request
+recipient, network, native asset, **entire exact invoice amount**, prior settlement and expiry under a request
 row lock in the attempt creation transaction. The global fee-relayer reservation
 and existing idempotency/reset fences remain in force. Before authorization the
 remaining amount and expiry are rechecked. An unknown signed outcome cannot be
@@ -39,24 +39,32 @@ The receipt worker accepts only confirmed, independently verified attempts and
 their committed native-SAC transfer events. It matches the persisted request,
 hash, event ID, source, recipient and exact amount. The receipt key is
 `TESTNET:<transactionHash>:<operationIndex>:<eventIndex>`, not an amount or time.
-Each receipt is allocated in full to one invoice; a primary key prevents double
-credit across retries, workers and invoices. Allocation and its outbox event
+Exactly **one receipt** may be allocated to an invoice; its native XLM amount must equal the full invoice amount. PostgreSQL enforces a unique constraint on invoice ID and an exact-amount/destination/funding-exclusion trigger in addition to the application row lock. The receipt primary key independently prevents double credit across retries, workers and invoices. Allocation and its outbox event
 commit atomically. A worker restart recovers any confirmed but unallocated
 attempt. Polling does not create transfers.
 
 Verified address-only deposits are **unmatched**. The merchant can explicitly
 assign a receipt from their own wallet to an invoice with an evidence note and
 confirmation. Another merchant's receipts, already allocated receipts and
-invoice-checkout receipts cannot be reassigned. Funding grants also appear as
-unmatched receipts; operators must not assign them as customer payments. The
+invoice-checkout receipts cannot be reassigned. Known Friendbot and treasury funding grants are excluded from the unmatched-invoice list and rejected by service and database settlement rules. The
 audit retains the authenticated actor, method, note, time and transfer reference.
 There is no deletion, reversal, refund, or receipt splitting in this version.
 
-Statuses are `unpaid`, `partially_paid`, `paid` and `overpaid`, calculated using
-integer strings. Expiry and pending payment are separate fields. Partial manual
-payments reduce the next checkout amount; excess payments are recorded in full.
-If an external payment arrives after authorization, an overpayment is possible
-and is shown explicitly. No automatic refunds or amount-based guesses occur.
+The accepted new settlement states are `unpaid` and `paid`, calculated with
+integer strings. The older `partially_paid` and `overpaid` response labels
+remain readable for historical records; these are **closed** to all new
+checkout payments and allocations. A verified partial, excess, or second receipt
+remains unmatched and must be investigated outside the settled invoice. Manual
+allocation also refuses to proceed while an invoice-linked attempt is unsigned,
+pending, or has an unknown outcome: otherwise a transfer that subsequently
+settles could double-pay. Expiry and pending are separate fields.
+A paid/allocated QR never initiates another payment through the Cherry Wallet
+API. No automatic refund, balance reversal or off-chain approximation occurs.
+
+A sender can still independently transfer XLM to the merchant's shared public
+C-address without using the invoice payment link. Stellar itself cannot know
+which off-chain invoice a general-purpose address transfer refers to. These
+off-link transfers cannot be automatically attributed to a closed invoice.
 
 ## API
 
@@ -116,10 +124,17 @@ configuration; delivered events are not automatically replayed to a new system.
 
 ## Verification and rollout
 
-Migration `015_invoice_requests.sql` is additive; existing attempts retain their
-IDs/digests and gain a nullable generated request FK. Tests exercise same-value
-invoices, cross-owner isolation, concurrent creation/allocation, unknown outcome
-fences, partial/overpayments, late receipts and webhook retry/leases. Chain and
+Migration `015_invoice_requests.sql` originally created the immutable QR requests.
+Migration `017_single_invoice_settlement.sql` adds database-level **one-receipt
+per invoice** uniqueness and an exact-amount trigger. Before applying it, audit
+historic invoices: the migration intentionally fails with
+`SINGLE_INVOICE_SETTLEMENT_MIGRATION_REQUIRES_MANUAL_RECONCILIATION` if any
+invoice has multiple allocations or a partial/excess/wrong-destination
+allocation. Never silently discard or reassign confirmed financial events.
+Resolve historical exceptions explicitly in an approved reconciliation process
+before promotion. Tests exercise unique QR IDs, parallel attempts and
+allocations, no second payment after settlement, expired receipts, security
+guards and webhook retry/leases. Chain and
 WebAuthn inputs in these tests are mocks: this is not new live Testnet acceptance.
 Run API typecheck/tests with PostgreSQL integration enabled and web build/lint/
 tests, then export the OpenAPI document. Merge through review into develop.

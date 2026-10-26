@@ -50,7 +50,12 @@ describe.skipIf(process.env.RUN_DB_INTEGRATION!=='1')('invoice reconciliation Po
   afterAll(async()=>{await pool.end();await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);});
   it('recovers concurrent invoice creation, preserves exact amounts and isolates merchant references',async()=>{
     const i={...input(),amountStroops:'9007199254740993'};
-    const [a,b]=await Promise.all([create(i),create(i)]);expect(a.id).toBe(b.id);expect(a.amountStroops).toBe(i.amountStroops);
+    const [a,b]=await Promise.all([create(i),create(i)]);
+    expect(a.id).toBe(b.id);expect(a.amountStroops).toBe(i.amountStroops);
+    const different=await create({...i,invoiceReference:i.invoiceReference+'-NEW'});
+    expect(different.id).not.toBe(a.id);
+    expect(a.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(different.id).toMatch(/^[0-9a-f-]{36}$/);
     await expect(create({...i,amountStroops:'1'})).rejects.toThrow('INVOICE_REFERENCE_CONFLICT');
     expect((await invoices.create(other.owner,other.id,i)).id).not.toBe(a.id);
     await expect(invoices.get(other.owner,merchant.id,a.id)).rejects.toThrow('WALLET_NOT_FOUND');
@@ -84,17 +89,65 @@ describe.skipIf(process.env.RUN_DB_INTEGRATION!=='1')('invoice reconciliation Po
     await expect(payments.create(payer.owner,payer.id,intent(a),randomUUID())).rejects.toThrow('INVOICE_ALREADY_PAID');
     await expect(invoices.allocate(merchant.owner,merchant.id,b.id,paid.eventId!,'same amount only')).rejects.toThrow('RECEIPT_ALREADY_ALLOCATED');
   });
-  it('keeps address-only receipts unmatched and audits partial, overpaid, late and duplicate manual allocations',async()=>{
-    const r=await create(),one=await receipt('3000000'),two=await receipt('8000000');
-    expect((await invoices.unmatched(merchant.owner,merchant.id)).items).toHaveLength(2);
+  it('requires one exact payment and rejects partial, excess and duplicate manual settlement',async()=>{
+    const r=await create(),partial=await receipt('3000000'),excess=await receipt('11000000'),exact=await receipt(),another=await receipt();
+    expect((await invoices.unmatched(merchant.owner,merchant.id)).items).toHaveLength(4);
     await invoices.tick();expect((await invoices.checkout(r.id)).status).toBe('unpaid');
-    await Promise.all([invoices.allocate(merchant.owner,merchant.id,r.id,one.id,'Confirmed customer reference'),invoices.allocate(merchant.owner,merchant.id,r.id,one.id,'Duplicate retry')]);
-    expect((await invoices.checkout(r.id)).status).toBe('partially_paid');
-    await pool.query('UPDATE wallet_invoice_requests SET expires_at=1 WHERE id=$1',[r.id]);
-    const result=await invoices.allocate(merchant.owner,merchant.id,r.id,two.id,'Customer confirmed excess payment');
-    expect(result.status).toBe('overpaid');expect(result.paidStroops).toBe('11000000');expect(result.receipts.every(r=>r.late)).toBe(true);
-    expect((await invoices.unmatched(merchant.owner,merchant.id)).items).toHaveLength(0);
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,partial.id,'Partial receipt evidence')).rejects.toThrow('INVOICE_EXACT_AMOUNT_REQUIRED');
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,excess.id,'Excess receipt evidence')).rejects.toThrow('INVOICE_EXACT_AMOUNT_REQUIRED');
+    expect((await invoices.checkout(r.id)).paidStroops).toBe('0');
+    const result=await invoices.allocate(merchant.owner,merchant.id,r.id,exact.id,'Verified invoice reference and source');
+    expect(result.status).toBe('paid');expect(result.paidStroops).toBe('10000000');
+    expect(result.receipts).toHaveLength(1);
     expect(result.receipts[0].actor).toBe(merchant.owner);
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,another.id,'Attempting a second receipt')).rejects.toThrow('INVOICE_ALREADY_PAID');
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,exact.id,'Duplicate allocation attempt')).rejects.toThrow('INVOICE_ALREADY_PAID');
+    await expect(payments.create(other.owner,other.id,intent(r),randomUUID())).rejects.toThrow('INVOICE_ALREADY_PAID');
+    expect((await invoices.unmatched(merchant.owner,merchant.id)).items.map(x=>x.eventId)).toContain(another.id);
+    expect((await pool.query('SELECT count(*)::int AS n FROM wallet_invoice_allocations WHERE request_id=$1',[r.id])).rows[0].n).toBe(1);
+  });
+  it('refuses concurrent exact transfers for one invoice and enforces single allocation in PostgreSQL',async()=>{
+    const r=await create(),a=await receipt(),b=await receipt();
+    const results=await Promise.allSettled([
+      invoices.allocate(merchant.owner,merchant.id,r.id,a.id,'Evidence for payment A'),
+      invoices.allocate(merchant.owner,merchant.id,r.id,b.id,'Evidence for payment B')
+    ]);
+    expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);
+    expect(results.filter(x=>x.status==='rejected')).toHaveLength(1);
+    const first=(await invoices.get(merchant.owner,merchant.id,r.id)).receipts[0].eventId;
+    const second=first===a.id?b.id:a.id;
+    // Even a direct database writer cannot create a second invoice settlement.
+    await expect(pool.query(`INSERT INTO wallet_invoice_allocations(event_id,request_id,method,actor,note,created_at)
+      VALUES($1,$2,'manual','bypass','direct SQL bypass attempt',$3)`,[second,r.id,Date.now()])).rejects.toThrow();
+    expect((await invoices.checkout(r.id)).status).toBe('paid');
+  });
+  it('database trigger rejects non-exact invoice allocations even if a caller bypasses the API',async()=>{
+    const r=await create(),partial=await receipt('5000000');
+    await expect(pool.query(`INSERT INTO wallet_invoice_allocations(event_id,request_id,method,actor,note,created_at)
+      VALUES($1,$2,'manual','bypass','partial settlement bypass attempt',$3)`,[partial.id,r.id,Date.now()])).rejects.toThrow('INVOICE_EXACT_RECEIPT_REQUIRED');
+    expect((await invoices.checkout(r.id)).status).toBe('unpaid');
+  });
+  it('allows one exact verified receipt after QR expiry, but never a second one',async()=>{
+    const r=await create(),e=await receipt(),otherEvent=await receipt();
+    await pool.query('UPDATE wallet_invoice_requests SET expires_at=1 WHERE id=$1',[r.id]);
+    expect((await invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'Late but independently verified receipt')).status).toBe('paid');
+    expect((await invoices.get(merchant.owner,merchant.id,r.id)).receipts[0].late).toBe(true);
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,otherEvent.id,'Second late receipt refused')).rejects.toThrow('INVOICE_ALREADY_PAID');
+  });
+  it('never treats known Friendbot funding as an invoice payment or an unmatched customer receipt',async()=>{
+    const r=await create(),hash=randomBytes(32).toString('hex');
+    await pool.query("INSERT INTO wallet_deployment_jobs(account_id,status,contract_address,transaction_hash) VALUES($1,'CONFIRMED',$2,$3)",
+      [merchant.owner,merchant.address,randomBytes(32).toString('hex')]);
+    await pool.query("INSERT INTO wallet_friendbot_funding(account_id,address,transaction_hash) VALUES($1,$2,$3)",
+      [merchant.owner,merchant.address,hash]);
+    const grant=await receipt(r.amountStroops,merchant.address,hash);
+    expect((await invoices.unmatched(merchant.owner,merchant.id)).items.map(x=>x.eventId)).not.toContain(grant.id);
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,grant.id,'This is only a Testnet funding grant')).rejects.toThrow('SYSTEM_FUNDING_CANNOT_SETTLE_INVOICE');
+    await expect(pool.query(`INSERT INTO wallet_invoice_allocations(event_id,request_id,method,actor,note,created_at)
+      VALUES($1,$2,'manual','bypass','attempted grant allocation',$3)`,[grant.id,r.id,Date.now()])).rejects.toThrow('SYSTEM_FUNDING_CANNOT_SETTLE_INVOICE');
+    expect((await invoices.checkout(r.id)).status).toBe('unpaid');
+    await pool.query('DELETE FROM wallet_friendbot_funding WHERE account_id=$1',[merchant.owner]);
+    await pool.query('DELETE FROM wallet_deployment_jobs WHERE account_id=$1',[merchant.owner]);
   });
   it('prevents receipt theft across merchants and simultaneous allocation to different invoices',async()=>{
     const r=await create(),s=await create(),wrong=await receipt('1',other.address);
@@ -103,12 +156,14 @@ describe.skipIf(process.env.RUN_DB_INTEGRATION!=='1')('invoice reconciliation Po
     const results=await Promise.allSettled([invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'Customer confirmed'),invoices.allocate(merchant.owner,merchant.id,s.id,e.id,'Customer confirmed')]);
     expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
   });
-  it('revalidates remaining invoice amount before signing after a manual payment',async()=>{
+  it('blocks manual settlement while another payer has a potentially live invoice payment',async()=>{
     const r=await create(),a=await payments.create(payer.owner,payer.id,intent(r),randomUUID());
-    const e=await receipt('2000000');await invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'External partial payment confirmed');
-    const result=await payments.approve(payer.owner,payer.id,a.id,'auth');expect(result.status).toBe('rejected');expect(result.failureCode).toBe('INVOICE_AMOUNT_CHANGED');
-    const fresh=await invoices.checkout(r.id);expect(fresh.remainingStroops).toBe('8000000');
-    const retry=await payments.create(payer.owner,payer.id,intent(fresh),randomUUID());expect(retry.intent.amountStroops).toBe('8000000');
+    const e=await receipt();
+    await expect(invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'External full payment confirmed')).rejects.toThrow('INVOICE_PAYMENT_UNRESOLVED');
+    await payments.cancel(payer.owner,payer.id,a.id);
+    const paid=await invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'External full payment confirmed');
+    expect(paid.status).toBe('paid');
+    await expect(payments.create(payer.owner,payer.id,intent(r),randomUUID())).rejects.toThrow('INVOICE_ALREADY_PAID');
   });
   it('sends authenticated, scoped webhooks with stable IDs, durable retry and concurrent worker fencing',async()=>{
     const r=await create(),e=await receipt();await invoices.allocate(merchant.owner,merchant.id,r.id,e.id,'Invoice confirmed');

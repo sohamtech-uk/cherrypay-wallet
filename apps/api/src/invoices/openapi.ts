@@ -23,15 +23,15 @@ export const invoiceSchemas={
 function operation(summary:string,response:object,body?:object,publicRead=false) {
   return {summary,security:publicRead?[]:[{WalletSession:[]}],...(body?{requestBody:{required:true,content:{'application/json':{schema:body}}}}:{}),responses:{
     '200':{description:'Persisted invoice data. Only independently verified native XLM receipts affect settlement.',content:{'application/json':{schema:response}}},
-    '400':{description:'Invalid request'},'401':{description:'Authentication required'},'403':{description:'Untrusted mutation origin'},'404':{description:'Resource not found or not owned'},'409':{description:'Invoice conflict, receipt already allocated, or unresolved payment'},'503':{description:'Invoice service unavailable'}
+    '400':{description:'Invalid request'},'401':{description:'Authentication required'},'403':{description:'Untrusted mutation origin'},'404':{description:'Resource not found or not owned'},'409':{description:'Invoice already paid, unresolved payment, receipt not exact, or reference conflict'},'503':{description:'Invoice service unavailable'}
   }};
 }
 const wallet={name:'walletId',in:'path',required:true,schema:text},id={name:'requestId',in:'path',required:true,schema:text},cursor={name:'cursor',in:'query',schema:text};
 const base='/api/v1/wallets/{walletId}/invoices';
 export const invoicePaths={
-  '/api/v1/payment-requests/{requestId}':{parameters:[id],get:operation('Read checkout terms from an unguessable payment link; excludes payer and receipt history',ref('Invoice'),undefined,true)},
-  [base]:{parameters:[wallet],post:operation('Save or recover immutable invoice request by merchant wallet and invoice reference',ref('InvoiceDetail'),ref('InvoiceInput')),get:{...operation('List owned invoice payment requests',ref('InvoicePage')),parameters:[cursor]}},
+  '/api/v1/payment-requests/{requestId}':{parameters:[id],get:operation('Read unique invoice QR terms and settlement status; a paid or unresolved request cannot begin another checkout',ref('Invoice'),undefined,true)},
+  [base]:{parameters:[wallet],post:operation('Issue one unique QR UUID per immutable merchant invoice reference; identical retries recover the same QR',ref('InvoiceDetail'),ref('InvoiceInput')),get:{...operation('List owned invoice payment requests',ref('InvoicePage')),parameters:[cursor]}},
   [`${base}/{requestId}`]:{parameters:[wallet,id],get:operation('Read owned invoice and allocated receipts',ref('InvoiceDetail'))},
-  [`${base}/{requestId}/allocate`]:{parameters:[wallet,id],post:operation('Assign an entire verified unmatched receipt once, with an audit note',ref('InvoiceDetail'),allocationSchema)},
-  '/api/v1/wallets/{walletId}/unmatched-receipts':{parameters:[wallet],get:{...operation('List verified incoming native XLM receipts without invoice allocation',ref('UnmatchedReceipts')),parameters:[cursor]}}
+  [`${base}/{requestId}/allocate`]:{parameters:[wallet,id],post:operation('Allocate exactly one verified native XLM receipt matching the entire invoice amount; refuse further allocations',ref('InvoiceDetail'),allocationSchema)},
+  '/api/v1/wallets/{walletId}/unmatched-receipts':{parameters:[wallet],get:{...operation('List independently verified, unallocated receipts excluding system funding and invoice-linked transfers',ref('UnmatchedReceipts')),parameters:[cursor]}}
 };
