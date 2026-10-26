@@ -11,7 +11,10 @@ export async function assertInvoicePayment(client: PoolClient, intent: Intent, a
   requireThat(Number(r.expires_at) > Date.now(), 'PAYMENT_REQUEST_EXPIRED');
   const total = await client.query(`SELECT COALESCE(sum(e.amount_stroops),0)::text AS paid FROM wallet_invoice_allocations a
     JOIN wallet_transfer_events e ON e.id=a.event_id WHERE a.request_id=$1`, [r.id]);
-  const remaining = BigInt(r.amount_stroops) - BigInt(total.rows[0].paid);
+  // One settlement per invoice, including legacy partial/excess allocations.
+  // A historical partially-paid request must never accept a second charge.
+  requireThat(BigInt(total.rows[0].paid) === 0n, 'INVOICE_ALREADY_PAID');
+  const remaining = BigInt(r.amount_stroops);
   requireThat(remaining > 0n, 'INVOICE_ALREADY_PAID');
   requireThat(remaining.toString() === intent.amountStroops, 'INVOICE_AMOUNT_CHANGED');
   // Includes a confirmed payment awaiting allocation; a worker delay must not permit another charge.
