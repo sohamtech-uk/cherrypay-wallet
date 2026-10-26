@@ -56,7 +56,7 @@ it('saving a pay run never invokes the signer',async () => {
 it('resolves opted-in payroll emails before saving immutable Stellar destinations',async()=>{
   const adapter=fixture(),contract=StrKey.encodeContract(Buffer.alloc(32,12));
   adapter.supportedDestinations=['classic','contract'];
-  adapter.resolveRecipientEmail=vi.fn(async email=>({network:'TESTNET',email,address:contract,mailboxVerified:true,walletBindingVerified:true,legalIdentityVerified:false}));
+  adapter.resolveRecipientEmail=vi.fn(async (email: string)=>({network:'TESTNET' as const,email,address:contract,mailboxVerified:true as const,walletBindingVerified:true as const,legalIdentityVerified:false as const}));
   const result=await resolvePayrollRecipients('employee-1,employee@example.com,1.5000001',adapter);
   expect(result.items).toEqual([{reference:'employee-1',destination:contract,amountStroops:'15000001'}]);
   expect(result.aliases).toEqual({'employee-1':'employee@example.com'});
