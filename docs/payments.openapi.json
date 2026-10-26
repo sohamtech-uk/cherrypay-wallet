@@ -937,7 +937,7 @@
         }
       ],
       "get": {
-        "summary": "Read checkout terms from an unguessable payment link; excludes payer and receipt history",
+        "summary": "Read unique invoice QR terms and settlement status; a paid or unresolved request cannot begin another checkout",
         "security": [],
         "responses": {
           "200": {
@@ -963,7 +963,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
@@ -983,7 +983,7 @@
         }
       ],
       "post": {
-        "summary": "Save or recover immutable invoice request by merchant wallet and invoice reference",
+        "summary": "Issue one unique QR UUID per immutable merchant invoice reference; identical retries recover the same QR",
         "security": [
           {
             "WalletSession": []
@@ -1023,7 +1023,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
@@ -1061,7 +1061,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
@@ -1128,7 +1128,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
@@ -1156,7 +1156,7 @@
         }
       ],
       "post": {
-        "summary": "Assign an entire verified unmatched receipt once, with an audit note",
+        "summary": "Allocate exactly one verified native XLM receipt matching the entire invoice amount; refuse further allocations",
         "security": [
           {
             "WalletSession": []
@@ -1213,7 +1213,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
@@ -1233,7 +1233,7 @@
         }
       ],
       "get": {
-        "summary": "List verified incoming native XLM receipts without invoice allocation",
+        "summary": "List independently verified, unallocated receipts excluding system funding and invoice-linked transfers",
         "security": [
           {
             "WalletSession": []
@@ -1263,7 +1263,7 @@
             "description": "Resource not found or not owned"
           },
           "409": {
-            "description": "Invoice conflict, receipt already allocated, or unresolved payment"
+            "description": "Invoice already paid, unresolved payment, receipt not exact, or reference conflict"
           },
           "503": {
             "description": "Invoice service unavailable"
