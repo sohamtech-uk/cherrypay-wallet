@@ -22,3 +22,6 @@ The Send form shows both email and the resolved actual C-address, amount and max
 - Reconcile a real native XLM Testnet transfer against its committed event before claiming successful settlement.
 
 Automated tests establish API and PostgreSQL invariants; live Exchange email delivery, actual Testnet transfer and hardware passkey evidence require separate deployment acceptance.
+## Payroll pilot email recipients
+
+The existing Testnet XLM payroll pilot can accept a verified email in the second CSV column instead of a C/G-address. During creation, the wallet resolves that opted-in email and saves only the exact C-address and amount with the immutable pay-run line. It shows the alias during the current UI session and checks again immediately before a recipient's individual passkey approval. Aliases are not persisted with the payroll run; a later reviewer must independently match the saved internal employee reference to the actual address. Do NOT interpret mailbox verification as employment identity, tax compliance or real salary settlement.
