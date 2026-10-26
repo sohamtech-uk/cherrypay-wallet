@@ -3,10 +3,15 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Link } from 'react-router-dom';
 import { addressKind, explorerLink, NETWORK, xlm, type Attempt, type PaymentAdapter } from './model';
 import { usePayments } from './context';
+import { useWalletAccount } from './account-context';
 export function Receive() {
   const adapter = usePayments();
-  const route = adapter?.receive;
-  const valid = adapter?.network === NETWORK && route && addressKind(route.address) === route.route && route.address === adapter.address;
+  const account = useWalletAccount();
+  const deploymentRoute = account?.authenticated && account.deployment?.status === 'CONFIRMED' && account.deployment.address && addressKind(account.deployment.address) === 'contract'
+    ? { address: account.deployment.address, route: 'contract' as const, instructions: 'Receive Testnet native XLM using a Stellar Asset Contract transfer to this verified deployed smart-wallet address.' }
+    : undefined;
+  const route = adapter?.receive ?? deploymentRoute;
+  const valid = !!route && addressKind(route.address) === route.route && (!adapter || adapter.network === NETWORK && route.address === adapter.address);
   const [message, setMessage] = useState('');
   return <section className="card payment-screen"><span className="eyebrow">TESTNET XLM</span><h1>Receive XLM</h1><p>Testnet funds have no real-world value. Only use the supported route shown here.</p>{valid ? <>
     <h2>{route.route === 'contract' ? 'Smart-wallet transfer' : 'Classic account transfer'}</h2><p>{route.instructions}</p>
@@ -16,8 +21,8 @@ export function Receive() {
     <label htmlFor="receive-address">Your supported Testnet destination</label><textarea id="receive-address" readOnly value={route.address} rows={3}/>
     <button onClick={async () => { try { await navigator.clipboard.writeText(route.address); setMessage('Address copied.'); } catch { setMessage('Copy unavailable. Select the address above and copy it manually.'); } }}>Copy address</button>
     <p role="status">{message}</p>
-    <ReceiveActivity key={adapter.address} adapter={adapter}/>
-  </> : <><h2>Receive route not connected</h2><p>The wallet service must confirm your destination and supported funding route before we show an address or QR. A watch-only address does not establish wallet ownership.</p><Link className="secondary-button" to="/onboarding">Return to wallet setup</Link></>}</section>;
+    {adapter ? <ReceiveActivity key={adapter.address} adapter={adapter}/> : <><h2>Wallet activity</h2><p>Your verified receive address is available. Sign in with the payment service to refresh balance and verified transfer history.</p></>}
+  </> : <><h2>{account?.authenticated ? 'Receive route pending verification' : 'Sign in to view your receive address'}</h2><p>{account?.authenticated ? 'Your C-address will appear here as soon as its deployed signer binding is verified. Receiving does not require outgoing payment activation.' : 'Sign in with your passkey so the wallet service can load your verified deployed C-address. No signing approval is needed to receive.'}</p><Link className="secondary-button" to="/onboarding">Return to wallet setup</Link></>}</section>;
 }
 
 
